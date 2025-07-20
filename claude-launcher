@@ -208,7 +208,7 @@ KIMI_BASE_URL=https://api.moonshot.cn/anthropic/`;
 }
 
 // Launch Claude Code function with clean environment handoff
-function launchClaude(command, envVars = {}) {
+function launchClaude(command, envVars = {}, disableAuthTokens = false) {
     console.log('');
     console.log(colors.yellow + 'Starting Claude Code...' + colors.reset);
     console.log(colors.gray + `Command: ${command}` + colors.reset);
@@ -231,6 +231,13 @@ function launchClaude(command, envVars = {}) {
     
     // Prepare clean environment
     const env = { ...process.env, ...envVars };
+    
+    // Disable conflicting auth tokens when using Kimi API
+    if (disableAuthTokens) {
+        delete env.ANTHROPIC_AUTH_TOKEN;
+        delete env.CLAUDE_CODE_OAUTH_TOKEN;
+        console.log(colors.gray + '  Disabled: ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN' + colors.reset);
+    }
     
     // Parse command and arguments
     const args = command.split(' ');
@@ -572,7 +579,7 @@ async function handleKimiLaunch(command) {
         
         const kimiConfig = await getKimiConfig();
         if (kimiConfig) {
-            launchClaude(command, kimiConfig);
+            launchClaude(command, kimiConfig, true); // true to disable auth tokens
         }
     } catch (error) {
         console.log('');
