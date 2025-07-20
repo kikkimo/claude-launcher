@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const crypto = require('crypto');
 
 // Get config file location - check multiple locations for global installation
 function getConfigPath() {
@@ -45,20 +46,103 @@ const colors = {
     bgAmber: '\x1b[48;5;214m'      // Background amber
 };
 
-// Base64 double decryption function
-function decryptBase64Twice(encryptedValue) {
+// Generate encryption key from machine-specific data
+function getEncryptionKey() {
+    const os = require('os');
+    // Use a combination of hostname and user info to create a machine-specific key
+    const machineId = os.hostname() + os.userInfo().username + os.platform();
+    // Derive a 32-byte key using PBKDF2
+    return crypto.pbkdf2Sync(machineId, 'claude-launcher-salt', 10000, 32, 'sha256');
+}
+
+// Encrypt API key using AES-256-CBC
+function encryptApiKey(plaintext) {
     try {
-        // First base64 decode
-        const firstDecode = Buffer.from(encryptedValue, 'base64').toString('utf8');
+        const key = getEncryptionKey();
+        const iv = crypto.randomBytes(16); // Generate random IV
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
         
-        // Second base64 decode
-        const secondDecode = Buffer.from(firstDecode, 'base64').toString('utf8');
+        let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
         
-        return secondDecode;
+        // Combine IV and encrypted data
+        const result = iv.toString('hex') + ':' + encrypted;
+        
+        return {
+            success: true,
+            value: result,
+            error: null
+        };
     } catch (error) {
-        console.log(colors.yellow + 'Warning: Failed to decrypt API key. Using original value.' + colors.reset);
-        return encryptedValue;
+        return {
+            success: false,
+            value: null,
+            error: error.message
+        };
     }
+}
+
+// Decrypt API key using AES-256-CBC
+function decryptApiKey(encryptedData) {
+    try {
+        const key = getEncryptionKey();
+        
+        // Split IV and encrypted data
+        const parts = encryptedData.split(':');
+        if (parts.length !== 2) {
+            throw new Error('Invalid encrypted data format');
+        }
+        
+        const iv = Buffer.from(parts[0], 'hex');
+        const encrypted = parts[1];
+        
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        
+        return {
+            success: true,
+            value: decrypted,
+            error: null
+        };
+    } catch (error) {
+        return {
+            success: false,
+            value: null,
+            error: error.message
+        };
+    }
+}
+
+// Validate API key format
+function validateApiKey(apiKey) {
+    if (!apiKey || apiKey.trim() === '') {
+        return {
+            valid: false,
+            error: 'API key is empty or missing'
+        };
+    }
+    
+    if (!apiKey.startsWith('sk-')) {
+        return {
+            valid: false,
+            error: 'API key must start with "sk-"'
+        };
+    }
+    
+    if (apiKey.length < 20) {
+        return {
+            valid: false,
+            error: 'API key appears to be too short'
+        };
+    }
+    
+    return {
+        valid: true,
+        error: null,
+        value: apiKey
+    };
 }
 
 // Load configuration from .env file
@@ -76,10 +160,8 @@ function loadConfig() {
                     const key = match[1];
                     let value = match[2];
                     
-                    // Decrypt KIMI_API_KEY if it's base64 encoded
-                    if (key === 'KIMI_API_KEY' && value !== 'Your_Double_Base64_Encoded_Api_Key' && value !== 'your_kimi_api_key_here') {
-                        value = decryptBase64Twice(value);
-                    }
+                    // Store raw value for KIMI_API_KEY (validation will be done later)
+                    // Don't decrypt here to allow proper error handling
                     
                     config[key] = value;
                 }
@@ -188,29 +270,213 @@ function launchClaude(command, envVars = {}) {
     }
 }
 
-// Get Kimi configuration
-function getKimiConfig() {
-    const config = loadConfig();
-    const apiKey = config.KIMI_API_KEY;
-    const baseUrl = config.KIMI_BASE_URL;
-    
-    if (!apiKey || apiKey === 'Your_Double_Base64_Encoded_Api_Key' || apiKey === 'your_kimi_api_key_here') {
+// Simple input using readline (supports paste naturally)
+function simpleInput(prompt) {
+    return new Promise((resolve) => {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+        
+        rl.question(prompt, (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
+}
+
+// Prompt user to input API key with simple readline
+async function promptForApiKey() {
+    try {
+        console.clear();
         console.log('');
-        console.log(colors.yellow + '  Warning: Kimi API key not configured!' + colors.reset);
-        console.log(colors.yellow + `  Please edit ${CONFIG_FILE} and update KIMI_API_KEY.` + colors.reset);
-        console.log(colors.yellow + '  Note: The API key should be double base64 encoded.' + colors.reset);
+        console.log(colors.bright + colors.orange + '[*] Kimi API Key Setup' + colors.reset);
         console.log('');
-    } else {
+        console.log(colors.yellow + '[!] This message appears because you have not set up a Kimi API key,' + colors.reset);
+        console.log(colors.yellow + '    or the API key decrypted from your local config file is invalid.' + colors.reset);
         console.log('');
-        console.log(colors.green + '  API Key loaded successfully (decrypted from base64)' + colors.reset);
-        console.log(colors.gray + `  Key starts with: ${apiKey.substring(0, Math.min(8, apiKey.length))}...` + colors.reset);
+        console.log(colors.yellow + '[?] Why do you need to enter your API key?' + colors.reset);
+        console.log(colors.gray + '   • Kimi K2 API provides Claude-compatible interface' + colors.reset);
+        console.log(colors.gray + '   • Your API key enables access to Kimi\'s AI services' + colors.reset);
+        console.log(colors.bright + colors.green + '   • The key will be encrypted and stored locally' + colors.reset);
+        console.log(colors.bright + colors.green + '   • Only accessible on this machine' + colors.reset);
         console.log('');
+        console.log(colors.yellow + '[!] Security:' + colors.reset);
+        console.log(colors.gray + '   • API key is encrypted using AES-256-CBC' + colors.reset);
+        console.log(colors.gray + '   • Encryption key derived from machine-specific data' + colors.reset);
+        console.log(colors.gray + '   • Key cannot be decrypted on other machines' + colors.reset);
+        console.log('');
+        
+        // Show input box (fixed spacing)
+        console.log(colors.orange + '┌─────────────────────────────────────────────────────────┐' + colors.reset);
+        console.log(colors.orange + '│' + colors.reset + '  ' + colors.bright + 'Enter your Kimi API key' + '                                ' + colors.reset + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '├─────────────────────────────────────────────────────────┤' + colors.reset);
+        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'Format: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' + '     ' + colors.reset + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'You can copy and paste your API key here' + '               ' + colors.reset + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '│' + colors.reset + '  ' + colors.bright + colors.yellow + 'After entering, press ENTER to continue' + '                ' + colors.reset + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'Type "exit" or "quit" to return to menu' + '                ' + colors.reset + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '└─────────────────────────────────────────────────────────┘' + colors.reset);
+        console.log('');
+        
+        // Clean up any existing listeners once before the input loop
+        process.stdin.removeAllListeners('data');
+        process.stdin.removeAllListeners('keypress');
+        
+        // Input loop - allow retry on invalid input
+        while (true) {
+            const apiKey = await simpleInput(colors.green + '[>] API Key (press ENTER after input): ' + colors.reset);
+            
+            // Check for exit commands
+            if (apiKey.toLowerCase() === 'exit' || apiKey.toLowerCase() === 'quit') {
+                console.log('');
+                console.log(colors.yellow + '[!] Setup cancelled by user.' + colors.reset);
+                throw new Error('User cancelled setup');
+            }
+            
+            // Validate the entered API key
+            const validation = validateApiKey(apiKey);
+            
+            if (!validation.valid) {
+                console.log(colors.red + '[X] Invalid API key: ' + validation.error + colors.reset);
+                console.log(colors.yellow + '[!] Please try again with a valid API key.' + colors.reset);
+                console.log('');
+                continue; // Ask again
+            }
+            
+            // Encrypt and save the API key
+            const encrypted = encryptApiKey(apiKey);
+            
+            if (!encrypted.success) {
+                console.log(colors.red + '[X] Failed to encrypt API key: ' + encrypted.error + colors.reset);
+                console.log(colors.yellow + '[!] Please try again.' + colors.reset);
+                console.log('');
+                continue; // Ask again
+            }
+            
+            // Update configuration file
+            updateConfigFile('KIMI_API_KEY', encrypted.value);
+            
+            console.log('');
+            console.log(colors.green + '[+] API key encrypted and saved successfully!' + colors.reset);
+            console.log(colors.gray + '   Configuration saved to: ' + CONFIG_FILE + colors.reset);
+            console.log('');
+            
+            return apiKey;
+        }
+        
+    } catch (error) {
+        console.log(colors.red + '[X] Setup failed: ' + error.message + colors.reset);
+        process.exit(1);
     }
-    
-    return {
-        ANTHROPIC_BASE_URL: baseUrl,
-        ANTHROPIC_API_KEY: apiKey
-    };
+}
+
+// Update configuration file with new value
+function updateConfigFile(key, value) {
+    try {
+        let configContent = '';
+        let keyExists = false;
+        
+        // Read existing config if it exists
+        if (fs.existsSync(CONFIG_FILE)) {
+            configContent = fs.readFileSync(CONFIG_FILE, 'utf8');
+            const lines = configContent.split('\n');
+            
+            // Update existing key or add new one
+            for (let i = 0; i < lines.length; i++) {
+                const match = lines[i].match(/^([^=]+)=(.*)$/);
+                if (match && match[1] === key) {
+                    lines[i] = `${key}=${value}`;
+                    keyExists = true;
+                    break;
+                }
+            }
+            
+            if (keyExists) {
+                configContent = lines.join('\n');
+            } else {
+                // Add new key at the end
+                configContent += `\n${key}=${value}`;
+            }
+        } else {
+            // Create new config file
+            configContent = `# Claude Launcher Configuration\n# Generated automatically\n\n${key}=${value}\nKIMI_BASE_URL=https://api.moonshot.cn/anthropic/\n`;
+        }
+        
+        fs.writeFileSync(CONFIG_FILE, configContent);
+    } catch (error) {
+        console.log(colors.red + 'Error updating config file: ' + error.message + colors.reset);
+        throw error;
+    }
+}
+
+// Get Kimi configuration with validation and setup
+async function getKimiConfig() {
+    try {
+        const config = loadConfig();
+        const rawApiKey = config.KIMI_API_KEY;
+        const baseUrl = config.KIMI_BASE_URL || 'https://api.moonshot.cn/anthropic/';
+        
+        console.log('');
+        console.log(colors.bright + colors.orange + '[*] Validating Kimi API Configuration...' + colors.reset);
+        console.log('');
+        
+        // Check if API key is configured and valid
+        if (!rawApiKey || rawApiKey === 'Your_Double_Base64_Encoded_Api_Key' || rawApiKey === 'your_kimi_api_key_here') {
+            console.log(colors.yellow + '[!] No API key configured. Starting first-time setup...' + colors.reset);
+            console.log('');
+            
+            const apiKey = await promptForApiKey();
+            return {
+                ANTHROPIC_BASE_URL: baseUrl,
+                ANTHROPIC_API_KEY: apiKey
+            };
+        }
+        
+        // Try to decrypt existing API key
+        const decrypted = decryptApiKey(rawApiKey);
+        
+        if (!decrypted.success) {
+            console.log(colors.red + '[X] Failed to decrypt stored API key: ' + decrypted.error + colors.reset);
+            console.log(colors.yellow + '[!] This might happen if the key was encrypted on a different machine.' + colors.reset);
+            console.log(colors.yellow + '   Please re-enter your API key...' + colors.reset);
+            console.log('');
+            
+            const apiKey = await promptForApiKey();
+            return {
+                ANTHROPIC_BASE_URL: baseUrl,
+                ANTHROPIC_API_KEY: apiKey
+            };
+        }
+        
+        // Validate decrypted API key
+        const validation = validateApiKey(decrypted.value);
+        
+        if (!validation.valid) {
+            console.log(colors.red + '[X] Stored API key is invalid: ' + validation.error + colors.reset);
+            console.log('');
+            
+            const apiKey = await promptForApiKey();
+            return {
+                ANTHROPIC_BASE_URL: baseUrl,
+                ANTHROPIC_API_KEY: apiKey
+            };
+        }
+        
+        // Success case
+        console.log(colors.green + '[+] API Key validation successful!' + colors.reset);
+        console.log(colors.gray + `   Decrypted key starts with: ${validation.value.substring(0, 8)}...` + colors.reset);
+        console.log(colors.gray + `   Base URL: ${baseUrl}` + colors.reset);
+        console.log('');
+        
+        return {
+            ANTHROPIC_BASE_URL: baseUrl,
+            ANTHROPIC_API_KEY: validation.value
+        };
+        
+    } catch (error) {
+        console.log(colors.red + '[X] Configuration error: ' + error.message + colors.reset);
+        throw error;
+    }
 }
 
 // Display Claude Code style header
@@ -285,6 +551,33 @@ function handleKeyPress(key) {
     }
 }
 
+// Handle Kimi API launches with async configuration
+async function handleKimiLaunch(command) {
+    try {
+        // Clean up existing listeners before API key input
+        if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+            process.stdin.removeAllListeners('data');
+            process.stdin.pause();
+        }
+        
+        const kimiConfig = await getKimiConfig();
+        if (kimiConfig) {
+            launchClaude(command, kimiConfig);
+        }
+    } catch (error) {
+        console.log('');
+        console.log(colors.red + '[X] Failed to configure Kimi API: ' + error.message + colors.reset);
+        console.log(colors.gray + 'Returning to menu...' + colors.reset);
+        console.log('');
+        
+        // Simple delay before returning to menu
+        setTimeout(() => {
+            showMenu();
+        }, 2000);
+    }
+}
+
 // Execute selected menu item
 function executeSelection() {
     switch (selectedIndex) {
@@ -297,13 +590,11 @@ function executeSelection() {
             break;
             
         case 2: // Launch Claude Code with Kimi K2 API
-            const kimiConfig = getKimiConfig();
-            launchClaude('claude', kimiConfig);
+            handleKimiLaunch('claude');
             break;
             
         case 3: // Launch Claude Code with Kimi K2 API (Skip Permissions)
-            const kimiConfigSkip = getKimiConfig();
-            launchClaude('claude --dangerously-skip-permissions', kimiConfigSkip);
+            handleKimiLaunch('claude --dangerously-skip-permissions');
             break;
             
         case 4: // Exit
