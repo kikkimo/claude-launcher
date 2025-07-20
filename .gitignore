@@ -65,7 +65,10 @@ ehthumbs.db
 Thumbs.db
 
 # User-specific config files (keep template)
-claude-launcher.env
+.claude-launcher.env
+
+# Keep template file
+!claude-launcher-template.env
 
 # Test files
 test/
