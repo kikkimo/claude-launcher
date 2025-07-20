@@ -1,0 +1,56 @@
+{
+  "name": "@kikkimo/claude-launcher",
+  "version": "1.0.0",
+  "description": "Interactive launcher for Claude Code with beautiful Claude-style interface",
+  "main": "claude-launcher",
+  "bin": {
+    "claude-launcher": "./claude-launcher"
+  },
+  "scripts": {
+    "start": "node claude-launcher",
+    "test": "echo \"No tests specified\" && exit 0",
+    "prepublishOnly": "echo \"Publishing claude-launcher...\"",
+    "postinstall": "echo \"Claude Launcher installed successfully! Run 'claude-launcher' to start.\"",
+    "publish:public": "npm publish --access public"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "claude-launcher",
+    "claude-launcher-template.env",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "launcher",
+    "cli",
+    "interactive",
+    "menu",
+    "anthropic",
+    "kimi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kikkimo/claude-launcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kikkimo/claude-launcher/issues"
+  },
+  "homepage": "https://github.com/kikkimo/claude-launcher#readme",
+  "author": "kikkimo <fywhu@qq.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "preferGlobal": true,
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ]
+}

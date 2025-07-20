@@ -1,0 +1,372 @@
+#!/usr/bin/env node
+
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+
+// Get config file location - check multiple locations for global installation
+function getConfigPath() {
+    const locations = [
+        // Current working directory (highest priority)
+        path.join(process.cwd(), '.claude-launcher.env'),
+        // User home directory
+        path.join(require('os').homedir(), '.claude-launcher.env'),
+        // Script directory (for local installation)
+        path.join(__dirname, '.claude-launcher.env')
+    ];
+    
+    // Return the first existing config file, or the home directory path as default
+    for (const location of locations) {
+        if (fs.existsSync(location)) {
+            return location;
+        }
+    }
+    
+    // Default to home directory if no config exists
+    return path.join(require('os').homedir(), '.claude-launcher.env');
+}
+
+const CONFIG_FILE = getConfigPath();
+
+// ANSI color codes for Claude-style theming
+const colors = {
+    reset: '\x1b[0m',
+    bright: '\x1b[1m',
+    orange: '\x1b[38;5;208m',      // Claude brand orange
+    amber: '\x1b[38;5;214m',       // Amber/yellow-orange
+    white: '\x1b[37m',
+    gray: '\x1b[90m',
+    green: '\x1b[32m',
+    red: '\x1b[31m',
+    yellow: '\x1b[33m',
+    black: '\x1b[30m',
+    bgOrange: '\x1b[48;5;208m',    // Background orange
+    bgAmber: '\x1b[48;5;214m'      // Background amber
+};
+
+// Base64 double decryption function
+function decryptBase64Twice(encryptedValue) {
+    try {
+        // First base64 decode
+        const firstDecode = Buffer.from(encryptedValue, 'base64').toString('utf8');
+        
+        // Second base64 decode
+        const secondDecode = Buffer.from(firstDecode, 'base64').toString('utf8');
+        
+        return secondDecode;
+    } catch (error) {
+        console.log(colors.yellow + 'Warning: Failed to decrypt API key. Using original value.' + colors.reset);
+        return encryptedValue;
+    }
+}
+
+// Load configuration from .env file
+function loadConfig() {
+    const config = {};
+    
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const envContent = fs.readFileSync(CONFIG_FILE, 'utf8');
+            const lines = envContent.split('\n');
+            
+            lines.forEach(line => {
+                const match = line.match(/^([^=]+)=(.*)$/);
+                if (match) {
+                    const key = match[1];
+                    let value = match[2];
+                    
+                    // Decrypt KIMI_API_KEY if it's base64 encoded
+                    if (key === 'KIMI_API_KEY' && value !== 'Your_Double_Base64_Encoded_Api_Key' && value !== 'your_kimi_api_key_here') {
+                        value = decryptBase64Twice(value);
+                    }
+                    
+                    config[key] = value;
+                }
+            });
+        } else {
+            console.log(colors.yellow + 'Warning: .claude-launcher.env file not found!' + colors.reset);
+            console.log(colors.gray + `Searched locations:` + colors.reset);
+            console.log(colors.gray + `  - ${path.join(process.cwd(), '.claude-launcher.env')} (current directory)` + colors.reset);
+            console.log(colors.gray + `  - ${path.join(require('os').homedir(), '.claude-launcher.env')} (home directory)` + colors.reset);
+            console.log(colors.gray + `Creating default config at: ${CONFIG_FILE}` + colors.reset);
+            
+            // Try to read template file, fallback to hardcoded defaults
+            let defaultConfig = `KIMI_API_KEY=Your_Double_Base64_Encoded_Api_Key
+KIMI_BASE_URL=https://api.moonshot.cn/anthropic/`;
+            
+            const templatePath = path.join(__dirname, 'claude-launcher-template.env');
+            try {
+                if (fs.existsSync(templatePath)) {
+                    defaultConfig = fs.readFileSync(templatePath, 'utf8');
+                    console.log(colors.gray + `Using template from: ${templatePath}` + colors.reset);
+                }
+            } catch (templateError) {
+                console.log(colors.yellow + 'Template file not found, using defaults' + colors.reset);
+            }
+            
+            try {
+                fs.writeFileSync(CONFIG_FILE, defaultConfig);
+                console.log(colors.green + 'Default configuration file created successfully!' + colors.reset);
+                console.log(colors.gray + 'Please edit the file to add your actual API credentials.' + colors.reset);
+            } catch (error) {
+                console.log(colors.red + 'Failed to create config file: ' + error.message + colors.reset);
+            }
+            
+            config.KIMI_API_KEY = 'Your_Double_Base64_Encoded_Api_Key';
+            config.KIMI_BASE_URL = 'https://api.moonshot.cn/anthropic/';
+        }
+    } catch (error) {
+        console.log(colors.red + 'Error loading configuration: ' + error.message + colors.reset);
+        config.KIMI_API_KEY = 'Your_Double_Base64_Encoded_Api_Key';
+        config.KIMI_BASE_URL = 'https://api.moonshot.cn/anthropic/';
+    }
+    
+    return config;
+}
+
+// Launch Claude Code function
+function launchClaude(command, envVars = {}) {
+    console.log('');
+    console.log(colors.yellow + 'Starting Claude Code...' + colors.reset);
+    console.log(colors.gray + `Command: ${command}` + colors.reset);
+    
+    if (Object.keys(envVars).length > 0) {
+        console.log(colors.gray + 'Environment variables:' + colors.reset);
+        for (const [key, value] of Object.entries(envVars)) {
+            if (key === 'ANTHROPIC_API_KEY') {
+                console.log(colors.gray + `  ${key}=***` + colors.reset);
+            } else {
+                console.log(colors.gray + `  ${key}=${value}` + colors.reset);
+            }
+        }
+    }
+    
+    console.log('');
+    
+    // Set environment variables
+    const env = { ...process.env, ...envVars };
+    
+    // Parse command and arguments
+    const args = command.split(' ');
+    const cmd = args.shift();
+    
+    try {
+        const child = spawn(cmd, args, {
+            stdio: 'inherit',
+            env: env,
+            shell: true
+        });
+        
+        child.on('error', (error) => {
+            console.log(colors.red + 'Error launching Claude Code: ' + error.message + colors.reset);
+            console.log(colors.gray + 'Press any key to return to menu...' + colors.reset);
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            process.stdin.once('data', () => {
+                process.stdin.setRawMode(false);
+                showMenu();
+            });
+        });
+        
+        child.on('close', (code) => {
+            if (code !== 0 && code !== null) {
+                console.log(colors.red + `Claude Code exited with code ${code}` + colors.reset);
+            }
+            showMenu();
+        });
+        
+    } catch (error) {
+        console.log(colors.red + 'Error launching Claude Code: ' + error.message + colors.reset);
+        console.log(colors.gray + 'Press any key to return to menu...' + colors.reset);
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.once('data', () => {
+            process.stdin.setRawMode(false);
+            showMenu();
+        });
+    }
+}
+
+// Get Kimi configuration
+function getKimiConfig() {
+    const config = loadConfig();
+    const apiKey = config.KIMI_API_KEY;
+    const baseUrl = config.KIMI_BASE_URL;
+    
+    if (!apiKey || apiKey === 'Your_Double_Base64_Encoded_Api_Key' || apiKey === 'your_kimi_api_key_here') {
+        console.log('');
+        console.log(colors.yellow + '  Warning: Kimi API key not configured!' + colors.reset);
+        console.log(colors.yellow + `  Please edit ${CONFIG_FILE} and update KIMI_API_KEY.` + colors.reset);
+        console.log(colors.yellow + '  Note: The API key should be double base64 encoded.' + colors.reset);
+        console.log('');
+    } else {
+        console.log('');
+        console.log(colors.green + '  API Key loaded successfully (decrypted from base64)' + colors.reset);
+        console.log(colors.gray + `  Key starts with: ${apiKey.substring(0, Math.min(8, apiKey.length))}...` + colors.reset);
+        console.log('');
+    }
+    
+    return {
+        ANTHROPIC_BASE_URL: baseUrl,
+        ANTHROPIC_API_KEY: apiKey
+    };
+}
+
+// Display Claude Code style header
+function displayHeader() {
+    console.clear();
+    console.log('');
+    
+    // Claude-style orange/amber border with Unicode box drawing characters
+    const border = colors.orange;
+    const title = colors.white + colors.bright;
+    
+    console.log(border + '  ┌────────────────────────────────────────┐' + colors.reset);
+    console.log(border + '  │' + title + '           Claude Code Launcher         ' + border + '│' + colors.reset);
+    console.log(border + '  └────────────────────────────────────────┘' + colors.reset);
+    console.log('');
+    console.log(colors.gray + '  Use ↑↓ arrow keys to navigate, Enter to select' + colors.reset);
+    console.log('');
+}
+
+// Menu options
+const menuOptions = [
+    'Launch Claude Code',
+    'Launch Claude Code (Skip Permissions)',
+    'Launch Claude Code with Kimi K2 API',
+    'Launch Claude Code with Kimi K2 API (Skip Permissions)',
+    'Exit'
+];
+
+let selectedIndex = 0;
+
+// Display menu with current selection
+function displayMenu() {
+    displayHeader();
+    
+    menuOptions.forEach((option, index) => {
+        if (index === selectedIndex) {
+            // Selected item with Claude-style highlighting
+            console.log(colors.orange + '  → ' + colors.black + colors.bgAmber + option + colors.reset);
+        } else {
+            // Normal item
+            console.log(colors.gray + '    ' + option + colors.reset);
+        }
+    });
+    
+    console.log('');
+}
+
+// Handle key press
+function handleKeyPress(key) {
+    switch (key) {
+        case '\u001b[A': // Up arrow
+            selectedIndex = (selectedIndex - 1 + menuOptions.length) % menuOptions.length;
+            displayMenu();
+            break;
+            
+        case '\u001b[B': // Down arrow
+            selectedIndex = (selectedIndex + 1) % menuOptions.length;
+            displayMenu();
+            break;
+            
+        case '\r': // Enter
+            executeSelection();
+            break;
+            
+        case '\u001b': // Escape
+        case 'q':
+        case 'Q':
+            console.log('');
+            console.log(colors.green + 'Goodbye!' + colors.reset);
+            process.exit(0);
+            break;
+    }
+}
+
+// Execute selected menu item
+function executeSelection() {
+    switch (selectedIndex) {
+        case 0: // Launch Claude Code
+            launchClaude('claude');
+            break;
+            
+        case 1: // Launch Claude Code (Skip Permissions)
+            launchClaude('claude --dangerously-skip-permissions');
+            break;
+            
+        case 2: // Launch Claude Code with Kimi K2 API
+            const kimiConfig = getKimiConfig();
+            launchClaude('claude', kimiConfig);
+            break;
+            
+        case 3: // Launch Claude Code with Kimi K2 API (Skip Permissions)
+            const kimiConfigSkip = getKimiConfig();
+            launchClaude('claude --dangerously-skip-permissions', kimiConfigSkip);
+            break;
+            
+        case 4: // Exit
+            console.log('');
+            console.log(colors.green + 'Goodbye!' + colors.reset);
+            process.exit(0);
+            break;
+    }
+}
+
+// Initialize menu
+function showMenu() {
+    displayMenu();
+    
+    // Check if we're in a TTY environment
+    if (process.stdin.isTTY) {
+        // Set up raw mode for capturing arrow keys
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.setEncoding('utf8');
+        
+        process.stdin.on('data', (key) => {
+            handleKeyPress(key);
+        });
+    } else {
+        // Fallback for non-TTY environments - use readline
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+        
+        console.log(colors.yellow + '  Arrow keys not available. Enter selection number (1-5): ' + colors.reset);
+        
+        rl.on('line', (input) => {
+            const choice = parseInt(input.trim());
+            if (choice >= 1 && choice <= menuOptions.length) {
+                selectedIndex = choice - 1;
+                rl.close();
+                executeSelection();
+            } else if (input.toLowerCase() === 'q' || input.toLowerCase() === 'exit') {
+                rl.close();
+                console.log('');
+                console.log(colors.green + 'Goodbye!' + colors.reset);
+                process.exit(0);
+            } else {
+                console.log(colors.red + '  Invalid selection. Please enter 1-5.' + colors.reset);
+            }
+        });
+    }
+}
+
+// Handle process termination
+process.on('SIGINT', () => {
+    console.log('');
+    console.log(colors.green + 'Goodbye!' + colors.reset);
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('');
+    console.log(colors.green + 'Goodbye!' + colors.reset);
+    process.exit(0);
+});
+
+// Start the application
+showMenu();
