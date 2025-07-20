@@ -207,7 +207,7 @@ KIMI_BASE_URL=https://api.moonshot.cn/anthropic/`;
     return config;
 }
 
-// Launch Claude Code function
+// Launch Claude Code function with clean environment handoff
 function launchClaude(command, envVars = {}) {
     console.log('');
     console.log(colors.yellow + 'Starting Claude Code...' + colors.reset);
@@ -225,8 +225,11 @@ function launchClaude(command, envVars = {}) {
     }
     
     console.log('');
+    console.log(colors.green + '[+] Claude will run in current terminal.' + colors.reset);
+    console.log(colors.gray + '    Launcher will exit to transfer control to Claude.' + colors.reset);
+    console.log('');
     
-    // Set environment variables
+    // Prepare clean environment
     const env = { ...process.env, ...envVars };
     
     // Parse command and arguments
@@ -234,28 +237,34 @@ function launchClaude(command, envVars = {}) {
     const cmd = args.shift();
     
     try {
+        // Clean up terminal state before launching Claude
+        if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+        }
+        
+        // Remove all event listeners to avoid conflicts
+        process.stdin.removeAllListeners('data');
+        process.stdin.removeAllListeners('keypress');
+        process.removeAllListeners('SIGINT');
+        process.removeAllListeners('SIGTERM');
+        
+        // Launch Claude in current terminal, let it inherit everything
         const child = spawn(cmd, args, {
-            stdio: 'inherit',
+            stdio: 'inherit', // Claude takes over current terminal I/O
             env: env,
-            shell: true
+            cwd: process.cwd(),
+            shell: true // Use shell to find the command
+        });
+        
+        // Don't exit immediately, wait for Claude to exit then exit launcher
+        child.on('close', (code) => {
+            process.exit(code || 0);
         });
         
         child.on('error', (error) => {
-            console.log(colors.red + 'Error launching Claude Code: ' + error.message + colors.reset);
-            console.log(colors.gray + 'Press any key to return to menu...' + colors.reset);
-            process.stdin.setRawMode(true);
-            process.stdin.resume();
-            process.stdin.once('data', () => {
-                process.stdin.setRawMode(false);
-                showMenu();
-            });
-        });
-        
-        child.on('close', (code) => {
-            if (code !== 0 && code !== null) {
-                console.log(colors.red + `Claude Code exited with code ${code}` + colors.reset);
-            }
-            showMenu();
+            console.log(colors.red + 'Error running Claude: ' + error.message + colors.reset);
+            process.exit(1);
         });
         
     } catch (error) {
