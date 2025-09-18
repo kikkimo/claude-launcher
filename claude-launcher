@@ -1,679 +1,437 @@
 #!/usr/bin/env node
 
-const { spawn } = require('child_process');
+/**
+ * Claude Launcher - Refactored modular version
+ * A launcher for Claude Code with third-party API support
+ */
+
+const ApiManager = require('./lib/api-manager');
+const Menu = require('./lib/ui/menu');
+const colors = require('./lib/ui/colors');
+const {
+    waitForKey,
+    promptForThirdPartyApi,
+    confirmAction,
+    showSuccess,
+    showError,
+    showInfo
+} = require('./lib/ui/prompts');
+const {
+    launchClaudeDefault,
+    launchClaudeSkipPermissions,
+    launchClaudeWithApi,
+    testApiConnection
+} = require('./lib/launcher');
+const { maskSensitiveData } = require('./lib/validators');
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
-const crypto = require('crypto');
 
-// Get config file location - check multiple locations for global installation
-function getConfigPath() {
-    const locations = [
-        // Current working directory (highest priority)
-        path.join(process.cwd(), '.claude-launcher.env'),
-        // User home directory
-        path.join(require('os').homedir(), '.claude-launcher.env'),
-        // Script directory (for local installation)
-        path.join(__dirname, '.claude-launcher.env')
-    ];
-    
-    // Return the first existing config file, or the home directory path as default
-    for (const location of locations) {
-        if (fs.existsSync(location)) {
-            return location;
-        }
-    }
-    
-    // Default to home directory if no config exists
-    return path.join(require('os').homedir(), '.claude-launcher.env');
-}
+// Initialize components
+const apiManager = new ApiManager();
+const menu = new Menu();
 
-const CONFIG_FILE = getConfigPath();
-
-// ANSI color codes for Claude-style theming
-const colors = {
-    reset: '\x1b[0m',
-    bright: '\x1b[1m',
-    orange: '\x1b[38;5;208m',      // Claude brand orange
-    amber: '\x1b[38;5;214m',       // Amber/yellow-orange
-    white: '\x1b[37m',
-    gray: '\x1b[90m',
-    green: '\x1b[32m',
-    red: '\x1b[31m',
-    yellow: '\x1b[33m',
-    black: '\x1b[30m',
-    bgOrange: '\x1b[48;5;208m',    // Background orange
-    bgAmber: '\x1b[48;5;214m'      // Background amber
-};
-
-// Generate encryption key from machine-specific data
-function getEncryptionKey() {
-    const os = require('os');
-    // Use a combination of hostname and user info to create a machine-specific key
-    const machineId = os.hostname() + os.userInfo().username + os.platform();
-    // Derive a 32-byte key using PBKDF2
-    return crypto.pbkdf2Sync(machineId, 'claude-launcher-salt', 10000, 32, 'sha256');
-}
-
-// Encrypt API key using AES-256-CBC
-function encryptApiKey(plaintext) {
-    try {
-        const key = getEncryptionKey();
-        const iv = crypto.randomBytes(16); // Generate random IV
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-        
-        let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-        encrypted += cipher.final('hex');
-        
-        // Combine IV and encrypted data
-        const result = iv.toString('hex') + ':' + encrypted;
-        
-        return {
-            success: true,
-            value: result,
-            error: null
-        };
-    } catch (error) {
-        return {
-            success: false,
-            value: null,
-            error: error.message
-        };
-    }
-}
-
-// Decrypt API key using AES-256-CBC
-function decryptApiKey(encryptedData) {
-    try {
-        const key = getEncryptionKey();
-        
-        // Split IV and encrypted data
-        const parts = encryptedData.split(':');
-        if (parts.length !== 2) {
-            throw new Error('Invalid encrypted data format');
-        }
-        
-        const iv = Buffer.from(parts[0], 'hex');
-        const encrypted = parts[1];
-        
-        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-        
-        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-        decrypted += decipher.final('utf8');
-        
-        return {
-            success: true,
-            value: decrypted,
-            error: null
-        };
-    } catch (error) {
-        return {
-            success: false,
-            value: null,
-            error: error.message
-        };
-    }
-}
-
-// Validate API key format
-function validateApiKey(apiKey) {
-    if (!apiKey || apiKey.trim() === '') {
-        return {
-            valid: false,
-            error: 'API key is empty or missing'
-        };
-    }
-    
-    if (!apiKey.startsWith('sk-')) {
-        return {
-            valid: false,
-            error: 'API key must start with "sk-"'
-        };
-    }
-    
-    if (apiKey.length < 20) {
-        return {
-            valid: false,
-            error: 'API key appears to be too short'
-        };
-    }
-    
-    return {
-        valid: true,
-        error: null,
-        value: apiKey
-    };
-}
-
-// Load configuration from .env file
-function loadConfig() {
-    const config = {};
-    
-    try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            const envContent = fs.readFileSync(CONFIG_FILE, 'utf8');
-            const lines = envContent.split('\n');
-            
-            lines.forEach(line => {
-                const match = line.match(/^([^=]+)=(.*)$/);
-                if (match) {
-                    const key = match[1];
-                    let value = match[2];
-                    
-                    // Store raw value for KIMI_API_KEY (validation will be done later)
-                    // Don't decrypt here to allow proper error handling
-                    
-                    config[key] = value;
-                }
-            });
-        } else {
-            console.log(colors.yellow + 'Warning: .claude-launcher.env file not found!' + colors.reset);
-            console.log(colors.gray + `Searched locations:` + colors.reset);
-            console.log(colors.gray + `  - ${path.join(process.cwd(), '.claude-launcher.env')} (current directory)` + colors.reset);
-            console.log(colors.gray + `  - ${path.join(require('os').homedir(), '.claude-launcher.env')} (home directory)` + colors.reset);
-            console.log(colors.gray + `Creating default config at: ${CONFIG_FILE}` + colors.reset);
-            
-            // Try to read template file, fallback to hardcoded defaults
-            let defaultConfig = `KIMI_API_KEY=Your_Double_Base64_Encoded_Api_Key
-KIMI_BASE_URL=https://api.moonshot.cn/anthropic/`;
-            
-            const templatePath = path.join(__dirname, 'claude-launcher-template.env');
-            try {
-                if (fs.existsSync(templatePath)) {
-                    defaultConfig = fs.readFileSync(templatePath, 'utf8');
-                    console.log(colors.gray + `Using template from: ${templatePath}` + colors.reset);
-                }
-            } catch (templateError) {
-                console.log(colors.yellow + 'Template file not found, using defaults' + colors.reset);
-            }
-            
-            try {
-                fs.writeFileSync(CONFIG_FILE, defaultConfig);
-                console.log(colors.green + 'Default configuration file created successfully!' + colors.reset);
-                console.log(colors.gray + 'Please edit the file to add your actual API credentials.' + colors.reset);
-            } catch (error) {
-                console.log(colors.red + 'Failed to create config file: ' + error.message + colors.reset);
-            }
-            
-            config.KIMI_API_KEY = 'Your_Double_Base64_Encoded_Api_Key';
-            config.KIMI_BASE_URL = 'https://api.moonshot.cn/anthropic/';
-        }
-    } catch (error) {
-        console.log(colors.red + 'Error loading configuration: ' + error.message + colors.reset);
-        config.KIMI_API_KEY = 'Your_Double_Base64_Encoded_Api_Key';
-        config.KIMI_BASE_URL = 'https://api.moonshot.cn/anthropic/';
-    }
-    
-    return config;
-}
-
-// Launch Claude Code function with clean environment handoff
-function launchClaude(command, envVars = {}, disableAuthTokens = false) {
-    console.log('');
-    console.log(colors.yellow + 'Starting Claude Code...' + colors.reset);
-    console.log(colors.gray + `Command: ${command}` + colors.reset);
-    
-    if (Object.keys(envVars).length > 0) {
-        console.log(colors.gray + 'Environment variables:' + colors.reset);
-        for (const [key, value] of Object.entries(envVars)) {
-            if (key === 'ANTHROPIC_API_KEY') {
-                console.log(colors.gray + `  ${key}=***` + colors.reset);
-            } else {
-                console.log(colors.gray + `  ${key}=${value}` + colors.reset);
-            }
-        }
-    }
-    
-    console.log('');
-    console.log(colors.green + '[+] Claude will run in current terminal.' + colors.reset);
-    console.log(colors.gray + '    Launcher will exit to transfer control to Claude.' + colors.reset);
-    console.log('');
-    
-    // Prepare clean environment
-    const env = { ...process.env, ...envVars };
-    
-    // Disable conflicting auth tokens when using Kimi API
-    if (disableAuthTokens) {
-        delete env.ANTHROPIC_AUTH_TOKEN;
-        delete env.CLAUDE_CODE_OAUTH_TOKEN;
-        console.log(colors.gray + '  Disabled: ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN' + colors.reset);
-    }
-    
-    // Parse command and arguments
-    const args = command.split(' ');
-    const cmd = args.shift();
-    
-    try {
-        // Clean up terminal state before launching Claude
-        if (process.stdin.isTTY) {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-        }
-        
-        // Remove all event listeners to avoid conflicts
-        process.stdin.removeAllListeners('data');
-        process.stdin.removeAllListeners('keypress');
-        process.removeAllListeners('SIGINT');
-        process.removeAllListeners('SIGTERM');
-        
-        // Launch Claude in current terminal, let it inherit everything
-        const child = spawn(cmd, args, {
-            stdio: 'inherit', // Claude takes over current terminal I/O
-            env: env,
-            cwd: process.cwd(),
-            shell: true // Use shell to find the command
-        });
-        
-        // Don't exit immediately, wait for Claude to exit then exit launcher
-        child.on('close', (code) => {
-            process.exit(code || 0);
-        });
-        
-        child.on('error', (error) => {
-            console.log(colors.red + 'Error running Claude: ' + error.message + colors.reset);
-            process.exit(1);
-        });
-        
-    } catch (error) {
-        console.log(colors.red + 'Error launching Claude Code: ' + error.message + colors.reset);
-        console.log(colors.gray + 'Press any key to return to menu...' + colors.reset);
-        process.stdin.setRawMode(true);
-        process.stdin.resume();
-        process.stdin.once('data', () => {
-            process.stdin.setRawMode(false);
-            showMenu();
-        });
-    }
-}
-
-// Simple input using readline (supports paste naturally)
-function simpleInput(prompt) {
-    return new Promise((resolve) => {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-        
-        rl.question(prompt, (answer) => {
-            rl.close();
-            resolve(answer.trim());
-        });
-    });
-}
-
-// Prompt user to input API key with simple readline
-async function promptForApiKey() {
-    try {
-        console.clear();
-        console.log('');
-        console.log(colors.bright + colors.orange + '[*] Kimi API Key Setup' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '[!] This message appears because you have not set up a Kimi API key,' + colors.reset);
-        console.log(colors.yellow + '    or the API key decrypted from your local config file is invalid.' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '[?] Why do you need to enter your API key?' + colors.reset);
-        console.log(colors.gray + '   • Kimi K2 API provides Claude-compatible interface' + colors.reset);
-        console.log(colors.gray + '   • Your API key enables access to Kimi\'s AI services' + colors.reset);
-        console.log(colors.bright + colors.green + '   • The key will be encrypted and stored locally' + colors.reset);
-        console.log(colors.bright + colors.green + '   • Only accessible on this machine' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '[!] Security:' + colors.reset);
-        console.log(colors.gray + '   • API key is encrypted using AES-256-CBC' + colors.reset);
-        console.log(colors.gray + '   • Encryption key derived from machine-specific data' + colors.reset);
-        console.log(colors.gray + '   • Key cannot be decrypted on other machines' + colors.reset);
-        console.log('');
-        
-        // Show input box (fixed spacing)
-        console.log(colors.orange + '┌─────────────────────────────────────────────────────────┐' + colors.reset);
-        console.log(colors.orange + '│' + colors.reset + '  ' + colors.bright + 'Enter your Kimi API key' + '                                ' + colors.reset + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '├─────────────────────────────────────────────────────────┤' + colors.reset);
-        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'Format: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' + '     ' + colors.reset + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'You can copy and paste your API key here' + '               ' + colors.reset + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '│' + colors.reset + '  ' + colors.bright + colors.yellow + 'After entering, press ENTER to continue' + '                ' + colors.reset + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '│' + colors.reset + '  ' + colors.gray + 'Type "exit" or "quit" to return to menu' + '                ' + colors.reset + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '└─────────────────────────────────────────────────────────┘' + colors.reset);
-        console.log('');
-        
-        // Clean up any existing listeners once before the input loop
-        process.stdin.removeAllListeners('data');
-        process.stdin.removeAllListeners('keypress');
-        
-        // Input loop - allow retry on invalid input
-        while (true) {
-            const apiKey = await simpleInput(colors.green + '[>] API Key (press ENTER after input): ' + colors.reset);
-            
-            // Check for exit commands
-            if (apiKey.toLowerCase() === 'exit' || apiKey.toLowerCase() === 'quit') {
-                console.log('');
-                console.log(colors.yellow + '[!] Setup cancelled by user.' + colors.reset);
-                throw new Error('User cancelled setup');
-            }
-            
-            // Validate the entered API key
-            const validation = validateApiKey(apiKey);
-            
-            if (!validation.valid) {
-                console.log(colors.red + '[X] Invalid API key: ' + validation.error + colors.reset);
-                console.log(colors.yellow + '[!] Please try again with a valid API key.' + colors.reset);
-                console.log('');
-                continue; // Ask again
-            }
-            
-            // Encrypt and save the API key
-            const encrypted = encryptApiKey(apiKey);
-            
-            if (!encrypted.success) {
-                console.log(colors.red + '[X] Failed to encrypt API key: ' + encrypted.error + colors.reset);
-                console.log(colors.yellow + '[!] Please try again.' + colors.reset);
-                console.log('');
-                continue; // Ask again
-            }
-            
-            // Update configuration file
-            updateConfigFile('KIMI_API_KEY', encrypted.value);
-            
-            console.log('');
-            console.log(colors.green + '[+] API key encrypted and saved successfully!' + colors.reset);
-            console.log(colors.gray + '   Configuration saved to: ' + CONFIG_FILE + colors.reset);
-            console.log('');
-            
-            return apiKey;
-        }
-        
-    } catch (error) {
-        console.log(colors.red + '[X] Setup failed: ' + error.message + colors.reset);
-        process.exit(1);
-    }
-}
-
-// Update configuration file with new value
-function updateConfigFile(key, value) {
-    try {
-        let configContent = '';
-        let keyExists = false;
-        
-        // Read existing config if it exists
-        if (fs.existsSync(CONFIG_FILE)) {
-            configContent = fs.readFileSync(CONFIG_FILE, 'utf8');
-            const lines = configContent.split('\n');
-            
-            // Update existing key or add new one
-            for (let i = 0; i < lines.length; i++) {
-                const match = lines[i].match(/^([^=]+)=(.*)$/);
-                if (match && match[1] === key) {
-                    lines[i] = `${key}=${value}`;
-                    keyExists = true;
-                    break;
-                }
-            }
-            
-            if (keyExists) {
-                configContent = lines.join('\n');
-            } else {
-                // Add new key at the end
-                configContent += `\n${key}=${value}`;
-            }
-        } else {
-            // Create new config file
-            configContent = `# Claude Launcher Configuration\n# Generated automatically\n\n${key}=${value}\nKIMI_BASE_URL=https://api.moonshot.cn/anthropic/\n`;
-        }
-        
-        fs.writeFileSync(CONFIG_FILE, configContent);
-    } catch (error) {
-        console.log(colors.red + 'Error updating config file: ' + error.message + colors.reset);
-        throw error;
-    }
-}
-
-// Get Kimi configuration with validation and setup
-async function getKimiConfig() {
-    try {
-        const config = loadConfig();
-        const rawApiKey = config.KIMI_API_KEY;
-        const baseUrl = config.KIMI_BASE_URL || 'https://api.moonshot.cn/anthropic/';
-        
-        console.log('');
-        console.log(colors.bright + colors.orange + '[*] Validating Kimi API Configuration...' + colors.reset);
-        console.log('');
-        
-        // Check if API key is configured and valid
-        if (!rawApiKey || rawApiKey === 'Your_Double_Base64_Encoded_Api_Key' || rawApiKey === 'your_kimi_api_key_here') {
-            console.log(colors.yellow + '[!] No API key configured. Starting first-time setup...' + colors.reset);
-            console.log('');
-            
-            const apiKey = await promptForApiKey();
-            return {
-                ANTHROPIC_BASE_URL: baseUrl,
-                ANTHROPIC_API_KEY: apiKey
-            };
-        }
-        
-        // Try to decrypt existing API key
-        const decrypted = decryptApiKey(rawApiKey);
-        
-        if (!decrypted.success) {
-            console.log(colors.red + '[X] Failed to decrypt stored API key: ' + decrypted.error + colors.reset);
-            console.log(colors.yellow + '[!] This might happen if the key was encrypted on a different machine.' + colors.reset);
-            console.log(colors.yellow + '   Please re-enter your API key...' + colors.reset);
-            console.log('');
-            
-            const apiKey = await promptForApiKey();
-            return {
-                ANTHROPIC_BASE_URL: baseUrl,
-                ANTHROPIC_API_KEY: apiKey
-            };
-        }
-        
-        // Validate decrypted API key
-        const validation = validateApiKey(decrypted.value);
-        
-        if (!validation.valid) {
-            console.log(colors.red + '[X] Stored API key is invalid: ' + validation.error + colors.reset);
-            console.log('');
-            
-            const apiKey = await promptForApiKey();
-            return {
-                ANTHROPIC_BASE_URL: baseUrl,
-                ANTHROPIC_API_KEY: apiKey
-            };
-        }
-        
-        // Success case
-        console.log(colors.green + '[+] API Key validation successful!' + colors.reset);
-        console.log(colors.gray + `   Decrypted key starts with: ${validation.value.substring(0, 8)}...` + colors.reset);
-        console.log(colors.gray + `   Base URL: ${baseUrl}` + colors.reset);
-        console.log('');
-        
-        return {
-            ANTHROPIC_BASE_URL: baseUrl,
-            ANTHROPIC_API_KEY: validation.value
-        };
-        
-    } catch (error) {
-        console.log(colors.red + '[X] Configuration error: ' + error.message + colors.reset);
-        throw error;
-    }
-}
-
-// Display Claude Code style header
-function displayHeader() {
-    console.clear();
-    console.log('');
-    
-    // Claude-style orange/amber border with Unicode box drawing characters
-    const border = colors.orange;
-    const title = colors.white + colors.bright;
-    
-    console.log(border + '  ┌────────────────────────────────────────┐' + colors.reset);
-    console.log(border + '  │' + title + '           Claude Code Launcher         ' + border + '│' + colors.reset);
-    console.log(border + '  └────────────────────────────────────────┘' + colors.reset);
-    console.log('');
-    console.log(colors.gray + '  Use ↑↓ arrow keys to navigate, Enter to select' + colors.reset);
-    console.log('');
-}
-
-// Menu options
+// Main menu options
 const menuOptions = [
     'Launch Claude Code',
     'Launch Claude Code (Skip Permissions)',
-    'Launch Claude Code with Kimi K2 API',
-    'Launch Claude Code with Kimi K2 API (Skip Permissions)',
+    'Launch Claude Code with 3rd-party API',
+    'Launch Claude Code with 3rd-party API (Skip Permissions)',
+    'Add New 3rd-party API',
+    'Remove 3rd-party API',
+    'Switch 3rd-party API',
+    'View API Statistics',
+    'Export/Import Configuration',
     'Exit'
 ];
 
-let selectedIndex = 0;
-
-// Display menu with current selection
-function displayMenu() {
-    displayHeader();
-    
-    menuOptions.forEach((option, index) => {
-        if (index === selectedIndex) {
-            // Selected item with Claude-style highlighting
-            console.log(colors.orange + '  → ' + colors.black + colors.bgAmber + option + colors.reset);
-        } else {
-            // Normal item
-            console.log(colors.gray + '    ' + option + colors.reset);
-        }
-    });
-    
-    console.log('');
-}
-
-// Handle key press
-function handleKeyPress(key) {
-    switch (key) {
-        case '\u001b[A': // Up arrow
-            selectedIndex = (selectedIndex - 1 + menuOptions.length) % menuOptions.length;
-            displayMenu();
-            break;
-            
-        case '\u001b[B': // Down arrow
-            selectedIndex = (selectedIndex + 1) % menuOptions.length;
-            displayMenu();
-            break;
-            
-        case '\r': // Enter
-            executeSelection();
-            break;
-            
-        case '\u001b': // Escape
-        case 'q':
-        case 'Q':
-            console.log('');
-            console.log(colors.green + 'Goodbye!' + colors.reset);
-            process.exit(0);
-            break;
-    }
-}
-
-// Handle Kimi API launches with async configuration
-async function handleKimiLaunch(command) {
+/**
+ * Add new third-party API
+ */
+async function addNewThirdPartyApi() {
     try {
-        // Clean up existing listeners before API key input
+        // Clean up terminal state
         if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
             process.stdin.removeAllListeners('data');
             process.stdin.pause();
         }
-        
-        const kimiConfig = await getKimiConfig();
-        if (kimiConfig) {
-            launchClaude(command, kimiConfig, true); // true to disable auth tokens
+
+        const apiData = await promptForThirdPartyApi();
+
+        // Test connection before saving
+        console.log('');
+        const testResult = await testApiConnection({
+            baseUrl: apiData.baseUrl,
+            authToken: apiData.authToken
+        });
+
+        if (!testResult.success) {
+            const proceed = await confirmAction('⚠️  Connection test failed. Add anyway?');
+            if (!proceed) {
+                showInfo('API configuration cancelled');
+                await waitForKey('Press any key to return to main menu...');
+                return showMenu();
+            }
         }
+
+        const newApi = apiManager.addApi(
+            apiData.baseUrl,
+            apiData.authToken,
+            apiData.model,
+            apiData.name,
+            apiData.provider
+        );
+
+        showSuccess('Third-party API added successfully!', [
+            `Name: ${newApi.name}`,
+            `Provider: ${newApi.provider}`,
+            `Base URL: ${newApi.baseUrl}`,
+            `Model: ${newApi.model}`
+        ]);
+
+        if (apiManager.getApis().length === 1) {
+            showInfo('This is your first API - it has been set as active');
+        }
+
     } catch (error) {
+        showError('Failed to add API', [error.message]);
+    }
+
+    await waitForKey('Press any key to return to main menu...');
+    showMenu();
+}
+
+/**
+ * Remove third-party API
+ */
+async function removeThirdPartyApi() {
+    try {
+        const apis = apiManager.getApis();
+
+        if (apis.length === 0) {
+            showInfo('No third-party APIs configured', [
+                'Please add an API first using "Add New 3rd-party API"'
+            ]);
+            await waitForKey('Press any key to return to main menu...');
+            return showMenu();
+        }
+
+        const activeApi = apiManager.getActiveApi();
+        const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
+
+        const listItems = apis.map(api => ({
+            name: api.name,
+            details: [
+                `Provider: ${api.provider}`,
+                `Base URL: ${api.baseUrl}`,
+                `Model: ${api.model}`
+            ]
+        }));
+
+        const selectedIndex = await menu.selectFromList('Remove 3rd-party API', listItems, activeIndex);
+
+        if (selectedIndex === null) {
+            return showMenu();
+        }
+
+        const apiToRemove = apis[selectedIndex];
+
+        console.clear();
         console.log('');
-        console.log(colors.red + '[X] Failed to configure Kimi API: ' + error.message + colors.reset);
-        console.log(colors.gray + 'Returning to menu...' + colors.reset);
+        console.log(colors.bright + colors.orange + '⚠️  Confirm Removal' + colors.reset);
         console.log('');
-        
-        // Simple delay before returning to menu
+        showInfo(`API to remove: ${apiToRemove.name}`, [
+            `Base URL: ${apiToRemove.baseUrl}`,
+            `Model: ${apiToRemove.model}`
+        ]);
+
+        console.log(colors.red + '⚠️  This action cannot be undone!' + colors.reset);
+        console.log('');
+
+        const confirmed = await confirmAction('Are you sure you want to remove this API?');
+
+        if (confirmed) {
+            apiManager.removeApi(selectedIndex);
+            showSuccess('API removed successfully!');
+        } else {
+            showInfo('Removal cancelled');
+        }
+
+    } catch (error) {
+        showError('Failed to remove API', [error.message]);
+    }
+
+    await waitForKey('Press any key to return to main menu...');
+    showMenu();
+}
+
+/**
+ * Switch active third-party API
+ */
+async function switchThirdPartyApi() {
+    try {
+        const apis = apiManager.getApis();
+
+        if (apis.length === 0) {
+            showInfo('No third-party APIs configured', [
+                'Please add an API first using "Add New 3rd-party API"'
+            ]);
+            await waitForKey('Press any key to return to main menu...');
+            return showMenu();
+        }
+
+        const activeApi = apiManager.getActiveApi();
+        const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
+
+        const listItems = apis.map(api => ({
+            name: api.name,
+            details: [
+                `Provider: ${api.provider}`,
+                `Base URL: ${api.baseUrl}`,
+                `Model: ${api.model}`,
+                `Last Used: ${api.lastUsed || 'Never'}`,
+                `Usage Count: ${api.usageCount || 0}`
+            ]
+        }));
+
+        const selectedIndex = await menu.selectFromList('Switch 3rd-party API', listItems, activeIndex);
+
+        if (selectedIndex === null) {
+            return showMenu();
+        }
+
+        const selectedApi = apiManager.setActiveApi(selectedIndex);
+
+        console.clear();
+        showSuccess('API switched successfully!', [
+            `Active API: ${selectedApi.name}`,
+            `Provider: ${selectedApi.provider}`,
+            `Base URL: ${selectedApi.baseUrl}`,
+            `Model: ${selectedApi.model}`
+        ]);
+
+    } catch (error) {
+        showError('Failed to switch API', [error.message]);
+    }
+
+    await waitForKey('Press any key to return to main menu...');
+    showMenu();
+}
+
+/**
+ * View API statistics
+ */
+async function viewStatistics() {
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '📊 API Statistics' + colors.reset);
+    console.log('');
+
+    const stats = apiManager.getStatistics();
+    const apis = apiManager.getApis();
+
+    console.log(colors.cyan + '  Summary:' + colors.reset);
+    console.log(colors.gray + `    Total APIs: ${stats.totalApis}` + colors.reset);
+    console.log(colors.gray + `    Active API: ${stats.activeApiName}` + colors.reset);
+    console.log(colors.gray + `    Most Used: ${stats.mostUsedApi}` + colors.reset);
+    console.log(colors.gray + `    Total Usage: ${stats.totalUsage}` + colors.reset);
+    console.log('');
+
+    if (apis.length > 0) {
+        console.log(colors.cyan + '  Configured APIs:' + colors.reset);
+        apis.forEach((api, index) => {
+            const isActive = apiManager.getActiveApi()?.id === api.id;
+            console.log(colors.gray + `    ${index + 1}. ${api.name}${isActive ? ' (ACTIVE)' : ''}` + colors.reset);
+            console.log(colors.dim + `       Provider: ${api.provider}` + colors.reset);
+            console.log(colors.dim + `       Usage: ${api.usageCount || 0} times` + colors.reset);
+            console.log(colors.dim + `       Created: ${api.createdAt}` + colors.reset);
+        });
+    }
+
+    console.log('');
+    await waitForKey('Press any key to return to main menu...');
+    showMenu();
+}
+
+/**
+ * Export/Import configuration
+ */
+async function manageConfiguration() {
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '💾 Configuration Management' + colors.reset);
+    console.log('');
+
+    const exportImportMenu = new Menu();
+    exportImportMenu.setOptions([
+        'Export Configuration (Backup)',
+        'Import Configuration (Restore)',
+        'Back to Main Menu'
+    ]);
+
+    const choice = await exportImportMenu.navigate();
+
+    switch (choice) {
+        case 0: // Export
+            try {
+                const exportData = apiManager.exportConfig();
+                const filename = `claude-launcher-backup-${Date.now()}.json`;
+                const filepath = path.join(process.cwd(), filename);
+
+                fs.writeFileSync(filepath, exportData);
+                showSuccess('Configuration exported successfully!', [
+                    `File: ${filepath}`,
+                    'Note: Auth tokens are masked for security'
+                ]);
+            } catch (error) {
+                showError('Export failed', [error.message]);
+            }
+            await waitForKey('Press any key to continue...');
+            break;
+
+        case 1: // Import
+            try {
+                console.log(colors.yellow + 'Place the backup file in current directory' + colors.reset);
+                const files = fs.readdirSync(process.cwd())
+                    .filter(f => f.startsWith('claude-launcher-backup-') && f.endsWith('.json'));
+
+                if (files.length === 0) {
+                    showError('No backup files found in current directory');
+                } else {
+                    console.log(colors.cyan + 'Found backup files:' + colors.reset);
+                    files.forEach((f, i) => {
+                        console.log(colors.gray + `  ${i + 1}. ${f}` + colors.reset);
+                    });
+                    // Import logic would go here
+                    showInfo('Import feature coming soon');
+                }
+            } catch (error) {
+                showError('Import failed', [error.message]);
+            }
+            await waitForKey('Press any key to continue...');
+            break;
+
+        case 2: // Back
+        default:
+            break;
+    }
+
+    showMenu();
+}
+
+/**
+ * Handle third-party API launch
+ */
+async function handleThirdPartyApiLaunch(skipPermissions = false) {
+    try {
+        const activeApi = apiManager.getActiveApi();
+
+        if (!activeApi) {
+            console.clear();
+            showInfo('No Active Third-party API', [
+                'No third-party API is currently active.',
+                'Please add and configure an API first, or switch to an existing one.'
+            ]);
+
+            await waitForKey('Press any key to return to main menu...');
+            return showMenu();
+        }
+
+        launchClaudeWithApi(activeApi, skipPermissions);
+
+    } catch (error) {
+        showError('Failed to launch with third-party API', [error.message]);
+
         setTimeout(() => {
             showMenu();
         }, 2000);
     }
 }
 
-// Execute selected menu item
-function executeSelection() {
+/**
+ * Execute selected menu item
+ */
+async function executeSelection(selectedIndex) {
     switch (selectedIndex) {
         case 0: // Launch Claude Code
-            launchClaude('claude');
+            launchClaudeDefault();
             break;
-            
+
         case 1: // Launch Claude Code (Skip Permissions)
-            launchClaude('claude --dangerously-skip-permissions');
+            launchClaudeSkipPermissions();
             break;
-            
-        case 2: // Launch Claude Code with Kimi K2 API
-            handleKimiLaunch('claude');
+
+        case 2: // Launch Claude Code with 3rd-party API
+            await handleThirdPartyApiLaunch(false);
             break;
-            
-        case 3: // Launch Claude Code with Kimi K2 API (Skip Permissions)
-            handleKimiLaunch('claude --dangerously-skip-permissions');
+
+        case 3: // Launch Claude Code with 3rd-party API (Skip Permissions)
+            await handleThirdPartyApiLaunch(true);
             break;
-            
-        case 4: // Exit
+
+        case 4: // Add New 3rd-party API
+            await addNewThirdPartyApi();
+            break;
+
+        case 5: // Remove 3rd-party API
+            await removeThirdPartyApi();
+            break;
+
+        case 6: // Switch 3rd-party API
+            await switchThirdPartyApi();
+            break;
+
+        case 7: // View Statistics
+            await viewStatistics();
+            break;
+
+        case 8: // Export/Import Configuration
+            await manageConfiguration();
+            break;
+
+        case 9: // Exit
             console.log('');
-            console.log(colors.green + 'Goodbye!' + colors.reset);
+            console.log(colors.green + '👋 Goodbye!' + colors.reset);
             process.exit(0);
             break;
+
+        default:
+            showMenu();
+            break;
     }
 }
 
-// Initialize menu
-function showMenu() {
-    displayMenu();
-    
-    // Check if we're in a TTY environment
-    if (process.stdin.isTTY) {
-        // Set up raw mode for capturing arrow keys
-        process.stdin.setRawMode(true);
-        process.stdin.resume();
-        process.stdin.setEncoding('utf8');
-        
-        process.stdin.on('data', (key) => {
-            handleKeyPress(key);
-        });
+/**
+ * Show main menu
+ */
+async function showMenu() {
+    menu.setOptions(menuOptions);
+    const selection = await menu.navigate();
+
+    if (selection === -1) {
+        console.log('');
+        console.log(colors.green + '👋 Goodbye!' + colors.reset);
+        process.exit(0);
     } else {
-        // Fallback for non-TTY environments - use readline
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-        
-        console.log(colors.yellow + '  Arrow keys not available. Enter selection number (1-5): ' + colors.reset);
-        
-        rl.on('line', (input) => {
-            const choice = parseInt(input.trim());
-            if (choice >= 1 && choice <= menuOptions.length) {
-                selectedIndex = choice - 1;
-                rl.close();
-                executeSelection();
-            } else if (input.toLowerCase() === 'q' || input.toLowerCase() === 'exit') {
-                rl.close();
-                console.log('');
-                console.log(colors.green + 'Goodbye!' + colors.reset);
-                process.exit(0);
-            } else {
-                console.log(colors.red + '  Invalid selection. Please enter 1-5.' + colors.reset);
-            }
-        });
+        await executeSelection(selection);
     }
 }
 
-// Handle process termination
+/**
+ * Handle process termination
+ */
 process.on('SIGINT', () => {
     console.log('');
-    console.log(colors.green + 'Goodbye!' + colors.reset);
+    console.log(colors.green + '👋 Goodbye!' + colors.reset);
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
     console.log('');
-    console.log(colors.green + 'Goodbye!' + colors.reset);
+    console.log(colors.green + '👋 Goodbye!' + colors.reset);
     process.exit(0);
 });
 
 // Start the application
+console.log(colors.dim + 'Claude Launcher v2.0.0 - Modular Edition' + colors.reset);
 showMenu();
