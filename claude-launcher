@@ -23,10 +23,144 @@ const {
 } = require('./lib/launcher');
 const { getPasswordInput } = require('./lib/auth/password-input');
 const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { exec } = require('child_process');
 
 // Initialize components
 const apiManager = new ApiManager();
 const menu = new Menu();
+
+/**
+ * Get export directory path and create if not exists
+ * @returns {string} - Export directory path
+ */
+function getExportDirectory() {
+    const userHome = os.homedir();
+    const exportDir = path.join(userHome, 'claude-launcher');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(exportDir)) {
+        fs.mkdirSync(exportDir, { recursive: true });
+    }
+
+    return exportDir;
+}
+
+/**
+ * Generate timestamp-based filename for export
+ * @returns {string} - Filename with timestamp
+ */
+function generateExportFilename() {
+    const now = new Date();
+    const timestamp = now.getFullYear().toString() +
+                     (now.getMonth() + 1).toString().padStart(2, '0') +
+                     now.getDate().toString().padStart(2, '0') +
+                     now.getHours().toString().padStart(2, '0') +
+                     now.getMinutes().toString().padStart(2, '0') +
+                     now.getSeconds().toString().padStart(2, '0');
+
+    return `claude-launcher-export-${timestamp}.json`;
+}
+
+/**
+ * Open file with system default application
+ * @param {string} filePath - Path to the file to open
+ */
+function openFileWithDefault(filePath) {
+    const platform = process.platform;
+    let command;
+
+    if (platform === 'win32') {
+        command = `start "" "${filePath}"`;
+    } else if (platform === 'darwin') {
+        command = `open "${filePath}"`;
+    } else {
+        command = `xdg-open "${filePath}"`;
+    }
+
+    exec(command, (error) => {
+        if (error) {
+            console.log(colors.yellow + `Could not open file automatically: ${error.message}` + colors.reset);
+        }
+    });
+}
+
+/**
+ * Validate import file path and JSON format
+ * @param {string} filePath - Path to the JSON file
+ * @returns {Object} - Validation result with success status and data/error
+ */
+function validateImportFile(filePath) {
+    const result = {
+        valid: false,
+        data: null,
+        error: null
+    };
+
+    try {
+        // Check if file path is provided
+        if (!filePath || filePath.trim() === '') {
+            result.error = 'File path cannot be empty';
+            return result;
+        }
+
+        // Normalize and resolve path
+        const normalizedPath = path.resolve(filePath.trim());
+
+        // Check if file exists
+        if (!fs.existsSync(normalizedPath)) {
+            result.error = `File does not exist: ${normalizedPath}`;
+            return result;
+        }
+
+        // Check if it's a file (not directory)
+        const stats = fs.statSync(normalizedPath);
+        if (!stats.isFile()) {
+            result.error = `Path is not a file: ${normalizedPath}`;
+            return result;
+        }
+
+        // Check file extension
+        if (path.extname(normalizedPath).toLowerCase() !== '.json') {
+            result.error = `File must have .json extension: ${normalizedPath}`;
+            return result;
+        }
+
+        // Read and parse JSON file
+        const fileContent = fs.readFileSync(normalizedPath, 'utf8');
+
+        // Validate JSON format
+        let jsonData;
+        try {
+            jsonData = JSON.parse(fileContent);
+        } catch (parseError) {
+            result.error = `Invalid JSON format: ${parseError.message}`;
+            return result;
+        }
+
+        // Basic structure validation for claude-launcher config
+        if (!jsonData || typeof jsonData !== 'object') {
+            result.error = 'JSON file must contain a valid configuration object';
+            return result;
+        }
+
+        // Check for required fields (basic validation)
+        if (!jsonData.hasOwnProperty('apis') || !Array.isArray(jsonData.apis)) {
+            result.error = 'JSON file must contain an "apis" array';
+            return result;
+        }
+
+        result.valid = true;
+        result.data = fileContent; // Return raw JSON string for compatibility
+        return result;
+
+    } catch (error) {
+        result.error = `File validation error: ${error.message}`;
+        return result;
+    }
+}
 
 // Main menu options - simplified to 6 items
 const menuOptions = [
@@ -573,8 +707,9 @@ async function exportConfiguration() {
     // Add export function description
     console.log(colors.cyan + '📄 Export Function Description:' + colors.reset);
     console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
-    console.log(colors.gray + '  • Exported data is in plaintext JSON format for easy migration' + colors.reset);
-    console.log(colors.gray + '  • Export includes all API configurations (keys are encrypted in storage)' + colors.reset);
+    console.log(colors.gray + '  • Export saves a JSON file to your home directory' + colors.reset);
+    console.log(colors.gray + '  • File contains plaintext API configurations for easy migration' + colors.reset);
+    console.log(colors.gray + '  • File will be automatically opened after export' + colors.reset);
     console.log('');
 
     // Verify password before export
@@ -586,18 +721,33 @@ async function exportConfiguration() {
     }
 
     try {
-        // Export plaintext configuration data directly, no additional password needed
+        // Get export data
         const exportData = apiManager.exportConfigAuthenticated();
 
-        console.log(colors.green + '✓ Configuration exported successfully' + colors.reset);
+        // Prepare file path
+        const exportDir = getExportDirectory();
+        const filename = generateExportFilename();
+        const filePath = path.join(exportDir, filename);
+
+        // Write JSON file
+        fs.writeFileSync(filePath, exportData, 'utf8');
+
+        console.log(colors.green + '✓ Configuration exported successfully!' + colors.reset);
         console.log('');
-        console.log(colors.yellow + '📋 Exported Configuration Data (Plaintext JSON):' + colors.reset);
-        console.log(colors.gray + '━'.repeat(50) + colors.reset);
-        console.log(exportData);
-        console.log(colors.gray + '━'.repeat(50) + colors.reset);
+        console.log(colors.cyan + '📁 Export Details:' + colors.reset);
+        console.log(colors.gray + `  • File saved to: ${filePath}` + colors.reset);
+        console.log(colors.gray + `  • Export directory: ${exportDir}` + colors.reset);
+        console.log(colors.gray + `  • Filename: ${filename}` + colors.reset);
         console.log('');
-        console.log(colors.cyan + 'Please copy the above content and save to a file' + colors.reset);
-        console.log(colors.gray + 'Recommended to save as .json file format for easy import and migration' + colors.reset);
+
+        // Open file with default application
+        console.log(colors.yellow + '🔍 Opening exported file with default application...' + colors.reset);
+        openFileWithDefault(filePath);
+
+        console.log('');
+        console.log(colors.cyan + '💡 Tips:' + colors.reset);
+        console.log(colors.gray + '  • Share this file to migrate configurations to other machines' + colors.reset);
+        console.log(colors.gray + '  • Keep the file secure as it contains your API configurations' + colors.reset);
 
     } catch (error) {
         console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
@@ -619,7 +769,7 @@ async function importConfiguration() {
     // Add import function description
     console.log(colors.cyan + '📄 Import Function Description:' + colors.reset);
     console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
-    console.log(colors.gray + '  • Import data should be in plaintext JSON format' + colors.reset);
+    console.log(colors.gray + '  • Import reads a JSON file from the specified file path' + colors.reset);
     console.log(colors.gray + '  • Import data will be merged with current configuration (no overwrite)' + colors.reset);
     console.log(colors.gray + '  • Duplicate API configurations will be automatically skipped' + colors.reset);
     console.log('');
@@ -632,40 +782,81 @@ async function importConfiguration() {
     }
 
     console.log('');
-    console.log(colors.cyan + 'Please paste configuration data (plaintext JSON format):' + colors.reset);
-    console.log(colors.gray + '(Press Enter when finished pasting)' + colors.reset);
+    console.log(colors.cyan + '📁 File Input Required:' + colors.reset);
+    console.log(colors.gray + '  • Provide the full path to your JSON configuration file' + colors.reset);
+    console.log(colors.gray + '  • File must be a valid JSON file with .json extension' + colors.reset);
+    console.log(colors.gray + '  • File will be validated before import' + colors.reset);
+    console.log('');
 
-    const readline = require('readline');
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
+    const { simpleInput } = require('./lib/ui/prompts');
 
-    let configData = '';
-    rl.on('line', (line) => {
-        configData += line + '\n';
-    });
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    await new Promise((resolve) => {
-        rl.question('', () => {
-            rl.close();
-            resolve();
-        });
-    });
+    while (attempts < maxAttempts) {
+        attempts++;
 
-    try {
-        // Import plaintext configuration data directly, no password decryption needed
-        const result = apiManager.importConfigAuthenticated(configData.trim());
+        // Get file path from user
+        const filePath = await simpleInput(colors.green + `[>] Enter JSON file path (attempt ${attempts}/${maxAttempts}): ` + colors.reset);
 
-        console.log(colors.green + '✓ Configuration imported successfully' + colors.reset);
+        if (!filePath) {
+            console.log(colors.red + 'File path cannot be empty' + colors.reset);
+            if (attempts < maxAttempts) {
+                console.log('');
+                continue;
+            } else {
+                console.log(colors.red + 'Maximum attempts reached. Import cancelled.' + colors.reset);
+                await waitForKey('Press any key to return...');
+                return;
+            }
+        }
+
+        // Validate file
         console.log('');
-        console.log(colors.cyan + `Import Statistics:` + colors.reset);
-        console.log(colors.gray + `• Successfully imported: ${result.imported} API configurations` + colors.reset);
-        console.log(colors.gray + `• Skipped duplicates: ${result.skipped} API configurations` + colors.reset);
-        console.log(colors.gray + `• Configuration merged with existing data` + colors.reset);
+        console.log(colors.yellow + '🔍 Validating file...' + colors.reset);
+        const validation = validateImportFile(filePath);
 
-    } catch (error) {
-        console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
+        if (!validation.valid) {
+            console.log(colors.red + `❌ File validation failed: ${validation.error}` + colors.reset);
+            if (attempts < maxAttempts) {
+                console.log(colors.yellow + '💡 Please check the file path and ensure it\'s a valid JSON file' + colors.reset);
+                console.log('');
+                continue;
+            } else {
+                console.log(colors.red + 'Maximum attempts reached. Import cancelled.' + colors.reset);
+                await waitForKey('Press any key to return...');
+                return;
+            }
+        }
+
+        // File is valid, proceed with import
+        console.log(colors.green + '✓ File validation successful' + colors.reset);
+        console.log('');
+
+        try {
+            // Import the validated configuration data
+            const result = apiManager.importConfigAuthenticated(validation.data);
+
+            console.log(colors.green + '✓ Configuration imported successfully!' + colors.reset);
+            console.log('');
+            console.log(colors.cyan + '📊 Import Statistics:' + colors.reset);
+            console.log(colors.gray + `  • Successfully imported: ${result.imported} API configurations` + colors.reset);
+            console.log(colors.gray + `  • Skipped duplicates: ${result.skipped} API configurations` + colors.reset);
+            console.log(colors.gray + `  • Configuration merged with existing data` + colors.reset);
+            console.log(colors.gray + `  • Source file: ${path.resolve(filePath)}` + colors.reset);
+
+            break; // Success, exit the loop
+
+        } catch (error) {
+            console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
+            if (attempts < maxAttempts) {
+                console.log(colors.yellow + '💡 Please check the file content and format' + colors.reset);
+                console.log('');
+                continue;
+            } else {
+                console.log(colors.red + 'Maximum attempts reached. Import failed.' + colors.reset);
+            }
+        }
     }
 
     console.log('');
