@@ -218,7 +218,15 @@ async function addNewThirdPartyApi() {
         }
 
     } catch (error) {
-        showError(await i18n.t('errors.api.failed_add', error.message));
+        // Check if user cancelled the operation
+        const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
+        if (error.message === cancelledMessage) {
+            // User cancelled - show neutral message instead of error
+            console.log(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset);
+        } else {
+            // Actual error occurred
+            showError(await i18n.t('errors.api.failed_add', error.message));
+        }
     }
 
     await waitForKey(await i18n.t('messages.prompts.press_any_key'));
@@ -706,7 +714,7 @@ async function showMenu() {
 async function exportConfiguration() {
     console.clear();
     console.log('');
-    console.log(colors.bright + colors.orange + '💾 Export Configuration' + colors.reset);
+    console.log(colors.bright + colors.orange + '💾 ' + await i18n.t('import_export.export.title') + colors.reset);
     console.log('');
 
     // Add export function description
@@ -768,7 +776,7 @@ async function exportConfiguration() {
 async function importConfiguration() {
     console.clear();
     console.log('');
-    console.log(colors.bright + colors.orange + '📥 Import Configuration' + colors.reset);
+    console.log(colors.bright + colors.orange + '📥 ' + await i18n.t('import_export.import.title') + colors.reset);
     console.log('');
 
     // Add import function description
