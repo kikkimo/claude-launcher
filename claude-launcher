@@ -23,7 +23,7 @@ const {
     launchClaudeWithApi,
     testApiConnection
 } = require('./lib/launcher');
-const { maskSensitiveData } = require('./lib/validators');
+const { maskSensitiveData, maskApiToken } = require('./lib/validators');
 const fs = require('fs');
 const path = require('path');
 
@@ -127,14 +127,34 @@ async function removeThirdPartyApi() {
         const activeApi = apiManager.getActiveApi();
         const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-        const listItems = apis.map(api => ({
-            name: api.name,
-            details: [
-                `Provider: ${api.provider}`,
-                `Base URL: ${api.baseUrl}`,
-                `Model: ${api.model}`
-            ]
-        }));
+        const listItems = apis.map(api => {
+            // Decrypt and mask the API token for display
+            const { decrypt } = require('./lib/crypto');
+            let maskedToken;
+
+            try {
+                // All stored tokens are encrypted, decrypt for display
+                const decrypted = decrypt(api.authToken);
+                if (decrypted.success) {
+                    maskedToken = maskApiToken(decrypted.value);
+                } else {
+                    maskedToken = '***DECRYPT_ERROR***';
+                }
+            } catch (error) {
+                console.error('Error decrypting token:', error);
+                maskedToken = '***ERROR***';
+            }
+
+            return {
+                name: api.name,
+                details: [
+                    `Provider: ${api.provider}`,
+                    `Base URL: ${api.baseUrl}`,
+                    `Model: ${api.model}`,
+                    `API Token: ${maskedToken}`
+                ]
+            };
+        });
 
         const selectedIndex = await menu.selectFromList('Remove 3rd-party API', listItems, activeIndex);
 
@@ -190,16 +210,36 @@ async function switchThirdPartyApi() {
         const activeApi = apiManager.getActiveApi();
         const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-        const listItems = apis.map(api => ({
-            name: api.name,
-            details: [
-                `Provider: ${api.provider}`,
-                `Base URL: ${api.baseUrl}`,
-                `Model: ${api.model}`,
-                `Last Used: ${api.lastUsed || 'Never'}`,
-                `Usage Count: ${api.usageCount || 0}`
-            ]
-        }));
+        const listItems = apis.map(api => {
+            // Decrypt and mask the API token for display
+            const { decrypt } = require('./lib/crypto');
+            let maskedToken;
+
+            try {
+                // All stored tokens are encrypted, decrypt for display
+                const decrypted = decrypt(api.authToken);
+                if (decrypted.success) {
+                    maskedToken = maskApiToken(decrypted.value);
+                } else {
+                    maskedToken = '***DECRYPT_ERROR***';
+                }
+            } catch (error) {
+                console.error('Error decrypting token:', error);
+                maskedToken = '***ERROR***';
+            }
+
+            return {
+                name: api.name,
+                details: [
+                    `Provider: ${api.provider}`,
+                    `Base URL: ${api.baseUrl}`,
+                    `Model: ${api.model}`,
+                    `API Token: ${maskedToken}`,
+                    `Last Used: ${api.lastUsed || 'Never'}`,
+                    `Usage Count: ${api.usageCount || 0}`
+                ]
+            };
+        });
 
         const selectedIndex = await menu.selectFromList('Switch 3rd-party API', listItems, activeIndex);
 
@@ -460,7 +500,7 @@ async function manageExportPassword() {
 
         case 3: // Back (only when has password)
         default:
-            break;
+            return; // Direct return without waiting for key
     }
 
     await waitForKey('Press any key to continue...');
@@ -698,57 +738,140 @@ async function importConfiguration() {
     console.log(colors.bright + colors.orange + '📥 Import Configuration' + colors.reset);
     console.log('');
 
+    // Check if export password is set
+    if (!apiManager.hasExportPassword()) {
+        console.log(colors.red + '❌ Import Not Available' + colors.reset);
+        console.log('');
+        console.log(colors.yellow + '🔑 Export password not set.' + colors.reset);
+        console.log('');
+        console.log(colors.gray + 'To use import functionality:' + colors.reset);
+        console.log(colors.gray + '1. Set an export password first' + colors.reset);
+        console.log(colors.gray + '2. Import requires the same password that was used for export' + colors.reset);
+        console.log('');
+
+        const importMenu = new Menu();
+        importMenu.setOptions([
+            'Set Export Password Now',
+            'Back to API Management Menu'
+        ]);
+
+        const choice = await importMenu.navigate();
+        if (choice === 0) {
+            await setOrChangeExportPassword(true);
+        }
+        return;
+    }
+
     console.log(colors.yellow + '⚠️  Import Warning:' + colors.reset);
     console.log(colors.gray + '   • Importing will merge with existing APIs' + colors.reset);
-    console.log(colors.gray + '   • Duplicate base URLs will be skipped' + colors.reset);
+    console.log(colors.gray + '   • Duplicates (same URL + Token + Model) will be skipped' + colors.reset);
     console.log(colors.gray + '   • Original API settings will be preserved for duplicates' + colors.reset);
     console.log('');
 
-    // Find backup files
-    console.log(colors.cyan + '📁 Place your backup file in current directory' + colors.reset);
-    console.log(colors.gray + '    File name pattern: claude-launcher-backup-*.json' + colors.reset);
+    console.log(colors.cyan + '📁 Import Methods:' + colors.reset);
+    console.log(colors.gray + '1. Auto-detect files in current directory' + colors.reset);
+    console.log(colors.gray + '2. Enter JSON file path manually' + colors.reset);
     console.log('');
 
-    try {
-        const files = fs.readdirSync(process.cwd())
-            .filter(f => f.startsWith('claude-launcher-backup-') && f.endsWith('.json'))
-            .sort((a, b) => b.localeCompare(a)); // Sort by newest first
+    const methodChoice = await simpleInput(colors.green + '[>] Choose import method (1-2): ' + colors.reset);
 
-        if (files.length === 0) {
-            showError('No backup files found in current directory', [
-                'Please place your backup file in the current directory',
-                'File name should start with "claude-launcher-backup-"'
-            ]);
-            await waitForKey('Press any key to continue...');
+    let filePath;
+    let isEncrypted;
+
+    if (methodChoice === '1') {
+        // Auto-detect method
+        try {
+            const files = fs.readdirSync(process.cwd())
+                .filter(f => f.startsWith('claude-launcher-backup-') && f.endsWith('.json'))
+                .sort((a, b) => b.localeCompare(a)); // Sort by newest first
+
+            if (files.length === 0) {
+                showError('No backup files found in current directory', [
+                    'Please place your backup file in the current directory',
+                    'File name should start with "claude-launcher-backup-"'
+                ]);
+                await waitForKey('Press any key to continue...');
+                return;
+            }
+
+            console.log('');
+            console.log(colors.cyan + 'Detected files:' + colors.reset);
+            files.forEach((f, i) => {
+                const fileEncrypted = f.includes('encrypted');
+                const icon = fileEncrypted ? '🔒' : '📄';
+                const status = fileEncrypted ? '(Encrypted)' : '(Plain)';
+                console.log(colors.gray + `  ${i + 1}. ${icon} ${f} ${status}` + colors.reset);
+            });
+            console.log('');
+
+            const fileChoice = await simpleInput(colors.green + `[>] Select file (1-${files.length}): ` + colors.reset);
+            const fileIndex = parseInt(fileChoice) - 1;
+
+            if (fileIndex < 0 || fileIndex >= files.length) {
+                showError('Invalid file selection');
+                return;
+            }
+
+            const selectedFile = files[fileIndex];
+            filePath = path.join(process.cwd(), selectedFile);
+            isEncrypted = selectedFile.includes('encrypted');
+        } catch (error) {
+            showError('Failed to read directory', [error.message]);
             return;
         }
-
-        console.log(colors.cyan + 'Detected files:' + colors.reset);
-        files.forEach((f, i) => {
-            const isEncrypted = f.includes('encrypted');
-            const icon = isEncrypted ? '🔒' : '📄';
-            const status = isEncrypted ? '(Encrypted)' : '(Plain)';
-            console.log(colors.gray + `  ${i + 1}. ${icon} ${f} ${status}` + colors.reset);
-        });
+    } else if (methodChoice === '2') {
+        // Manual path input
         console.log('');
+        const inputPath = await simpleInput(colors.green + '[>] Enter full path to JSON file: ' + colors.reset);
 
-        const fileChoice = await simpleInput(colors.green + `[>] Select file (1-${files.length}): ` + colors.reset);
-        const fileIndex = parseInt(fileChoice) - 1;
-
-        if (fileIndex < 0 || fileIndex >= files.length) {
-            showError('Invalid file selection');
+        if (!inputPath || inputPath.trim() === '') {
+            showError('No file path provided');
             return;
         }
 
-        const selectedFile = files[fileIndex];
-        const filePath = path.join(process.cwd(), selectedFile);
-        const isEncrypted = selectedFile.includes('encrypted');
+        filePath = inputPath.trim();
 
-        // Read and parse file
+        // Check if file exists
+        if (!fs.existsSync(filePath)) {
+            showError('File not found', [`Path: ${filePath}`]);
+            return;
+        }
+
+        // Check if it's a JSON file
+        if (!filePath.toLowerCase().endsWith('.json')) {
+            showError('File must be a JSON file', [`Path: ${filePath}`]);
+            return;
+        }
+
+        // Try to determine if encrypted by checking filename or content
+        isEncrypted = path.basename(filePath).includes('encrypted');
+    } else {
+        showError('Invalid method selection');
+        return;
+    }
+
+    try {
+        // Read and validate JSON file
         const fileContent = fs.readFileSync(filePath, 'utf8');
         let configData;
 
+        // Try to parse as JSON first to validate format
+        try {
+            const jsonTest = JSON.parse(fileContent);
+            // Check if it might be encrypted by looking for encrypted field
+            if (jsonTest.encrypted === true) {
+                isEncrypted = true;
+            }
+        } catch (error) {
+            showError('Invalid JSON file format', [
+                'File is not a valid JSON file',
+                error.message
+            ]);
+            return;
+        }
+
         if (isEncrypted) {
+            console.log('');
             console.log(colors.yellow + '🔑 Password Required:' + colors.reset);
             const password = await simpleInput(colors.green + '[>] Enter export password: ' + colors.reset);
 
@@ -764,6 +887,15 @@ async function importConfiguration() {
         } else {
             try {
                 configData = JSON.parse(fileContent);
+
+                // Validate configuration structure
+                if (!configData.apis || !Array.isArray(configData.apis)) {
+                    showError('Invalid configuration file', [
+                        'Configuration file does not contain valid API data',
+                        'Expected: JSON object with "apis" array'
+                    ]);
+                    return;
+                }
             } catch (error) {
                 showError('Invalid configuration file format', [error.message]);
                 return;
@@ -838,9 +970,12 @@ async function previewImport(configData) {
     console.log('');
 
     configData.apis.forEach((api, index) => {
-        const isDuplicate = apiManager.getApis().some(existing => existing.baseUrl === api.baseUrl);
-        const status = isDuplicate ? '(Will be skipped - duplicate)' : '(Will be imported)';
-        const statusColor = isDuplicate ? colors.yellow : colors.green;
+        // Use the same duplicate check logic as import
+        const importToken = api.authToken === '***REQUIRES_MANUAL_INPUT***' ? '' : api.authToken;
+        const duplicate = apiManager.checkDuplicate(api.baseUrl, importToken, api.model);
+
+        const status = duplicate.isDuplicate ? '(Will be skipped - duplicate config)' : '(Will be imported)';
+        const statusColor = duplicate.isDuplicate ? colors.yellow : colors.green;
 
         console.log(colors.gray + `  ${index + 1}. ${api.name || 'Unnamed API'}` + colors.reset);
         console.log(colors.dim + `     Provider: ${api.provider || 'Unknown'}` + colors.reset);
