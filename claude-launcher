@@ -133,7 +133,7 @@ function validateImportFile(filePath) {
 
         // Check if file exists
         if (!fs.existsSync(normalizedPath)) {
-            result.error = `File does not exist: ${normalizedPath}`;
+            result.error = i18n.tSync('errors.file.file_not_found', normalizedPath);
             return result;
         }
 
@@ -170,7 +170,7 @@ function validateImportFile(filePath) {
 
         // Check for required fields (basic validation)
         if (!jsonData.hasOwnProperty('apis') || !Array.isArray(jsonData.apis)) {
-            result.error = 'JSON file must contain an "apis" array';
+            result.error = i18n.tSync('errors.file.invalid_format', 'JSON file must contain an "apis" array');
             return result;
         }
 
@@ -240,19 +240,10 @@ async function removeThirdPartyApi() {
         while (true) {
             // Get fresh API list each iteration
             const apis = apiManager.getApis();
-
-            if (apis.length === 0) {
-                showInfo(i18n.tSync('messages.info.no_apis_info_title'), [
-                    i18n.tSync('messages.info.apis_removed_or_none')
-                ]);
-                await waitForKey(i18n.tSync('messages.info.press_return_menu'));
-                return showMenu();
-            }
-
             const activeApi = apiManager.getActiveApi();
             const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-            // Show API selection table
+            // Show API selection table (handles no APIs case internally)
             const selectedApi = await showApiSelectionTable(
                 apis,
                 i18n.tSync('ui.general.select_api_remove'),
@@ -320,7 +311,7 @@ async function switchThirdPartyApi() {
         // 现在表格函数内部处理整个切换流程
         const selectedApi = await showApiSelectionTable(
             apis,
-            '[!] Select API to switch to:',
+            i18n.tSync('api.actions.select_to_switch'),
             'switch',
             activeIndex,
             apiManager  // 传递 apiManager 让表格函数处理切换逻辑
