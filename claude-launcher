@@ -24,6 +24,7 @@ const {
 const { getPasswordInput } = require('./lib/auth/password-input');
 const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
+const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -215,85 +216,73 @@ async function addNewThirdPartyApi() {
  */
 async function removeThirdPartyApi() {
     try {
-        const apis = apiManager.getApis();
+        while (true) {
+            // Get fresh API list each iteration
+            const apis = apiManager.getApis();
 
-        if (apis.length === 0) {
-            showInfo('No third-party APIs configured', [
-                'Please add an API first using "Add New 3rd-party API"'
-            ]);
-            await waitForKey('Press any key to return to main menu...');
-            return showMenu();
-        }
+            if (apis.length === 0) {
+                showInfo('No third-party APIs configured', [
+                    'All APIs have been removed or none were configured.'
+                ]);
+                await waitForKey('Press any key to return to main menu...');
+                return showMenu();
+            }
 
-        const activeApi = apiManager.getActiveApi();
-        const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
+            const activeApi = apiManager.getActiveApi();
+            const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-        const listItems = apis.map(api => {
-            // Decrypt and mask the API token for display
-            const { decrypt } = require('./lib/crypto');
-            let maskedToken;
+            // Show API selection table
+            const selectedApi = await showApiSelectionTable(
+                apis,
+                '[!] Select API to remove:',
+                'remove',
+                activeIndex
+            );
 
-            try {
-                // All stored tokens are encrypted, decrypt for display
-                const decrypted = decrypt(api.authToken);
-                if (decrypted.success) {
-                    maskedToken = maskApiToken(decrypted.value);
-                } else {
-                    maskedToken = '***DECRYPT_ERROR***';
+            if (!selectedApi) {
+                return showMenu();
+            }
+
+            // Show confirmation dialog
+            const confirmed = await confirmDeletion(selectedApi);
+
+            if (confirmed) {
+                try {
+                    // Find the index of the selected API in the current list
+                    const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
+                    apiManager.removeApi(selectedIndex);
+
+                    console.clear();
+                    showSuccess('API removed successfully!', [
+                        `Removed: ${selectedApi.name}`,
+                        `Provider: ${selectedApi.provider}`
+                    ]);
+
+                    // Check if there are more APIs to remove
+                    const remainingApis = apiManager.getApis();
+                    if (remainingApis.length === 0) {
+                        showInfo('All APIs have been removed');
+                        await waitForKey('Press any key to continue...');
+                        return showMenu();
+                    } else {
+                        console.log('');
+                        console.log(colors.gray + 'Press any key to continue selecting APIs to remove...' + colors.reset);
+                        await waitForKey();
+                        // Continue the loop to show updated list
+                    }
+
+                } catch (removeError) {
+                    showError('Failed to remove API', [removeError.message]);
+                    await waitForKey('Press any key to continue...');
+                    return showMenu();
                 }
-            } catch (error) {
-                console.error('Error decrypting token:', error);
-                maskedToken = '***ERROR***';
+            } else {
+                showInfo('Removal cancelled');
+                console.log('');
+                console.log(colors.gray + 'Press any key to continue...' + colors.reset);
+                await waitForKey();
+                // Continue the loop to show the list again
             }
-
-            return {
-                name: api.name,
-                details: [
-                    `Provider: ${api.provider}`,
-                    `Base URL: ${api.baseUrl}`,
-                    `Model: ${api.model}`,
-                    `API Token: ${maskedToken}`
-                ]
-            };
-        });
-
-        const selectedIndex = await menu.selectFromList('Remove 3rd-party API', listItems, activeIndex);
-
-        if (selectedIndex === null) {
-            return showMenu();
-        }
-
-        const apiToRemove = apis[selectedIndex];
-
-        console.clear();
-        console.log('');
-        console.log(colors.bright + colors.orange + '⚠️  Confirm Removal' + colors.reset);
-        console.log('');
-        showInfo(`API to remove: ${apiToRemove.name}`, [
-            `Base URL: ${apiToRemove.baseUrl}`,
-            `Model: ${apiToRemove.model}`
-        ]);
-
-        console.log(colors.red + '⚠️  This action cannot be undone!' + colors.reset);
-        console.log('');
-
-        const confirmed = await confirmAction('Are you sure you want to remove this API?');
-
-        if (confirmed) {
-            try {
-                apiManager.removeApi(selectedIndex);
-                showSuccess('API removed successfully!');
-                await waitForKey('Press any key to continue...');
-                return;
-            } catch (removeError) {
-                showError('Failed to remove API', [removeError.message]);
-                await waitForKey('Press any key to continue...');
-                return;
-            }
-        } else {
-            showInfo('Removal cancelled');
-            await waitForKey('Press any key to continue...');
-            return;
         }
 
     } catch (error) {
@@ -308,63 +297,30 @@ async function removeThirdPartyApi() {
 async function switchThirdPartyApi() {
     try {
         const apis = apiManager.getApis();
-
-        if (apis.length === 0) {
-            showInfo('No third-party APIs configured', [
-                'Please add an API first using "Add New 3rd-party API"'
-            ]);
-            await waitForKey('Press any key to return to main menu...');
-            return showMenu();
-        }
-
         const activeApi = apiManager.getActiveApi();
         const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-        const listItems = apis.map(api => {
-            // Decrypt and mask the API token for display
-            const { decrypt } = require('./lib/crypto');
-            let maskedToken;
+        const selectedApi = await showApiSelectionTable(
+            apis,
+            '[!] Select API to switch to:',
+            'switch',
+            activeIndex
+        );
 
-            try {
-                // All stored tokens are encrypted, decrypt for display
-                const decrypted = decrypt(api.authToken);
-                if (decrypted.success) {
-                    maskedToken = maskApiToken(decrypted.value);
-                } else {
-                    maskedToken = '***DECRYPT_ERROR***';
-                }
-            } catch (error) {
-                console.error('Error decrypting token:', error);
-                maskedToken = '***ERROR***';
-            }
-
-            return {
-                name: api.name,
-                details: [
-                    `Provider: ${api.provider}`,
-                    `Base URL: ${api.baseUrl}`,
-                    `Model: ${api.model}`,
-                    `API Token: ${maskedToken}`,
-                    `Last Used: ${api.lastUsed || 'Never'}`,
-                    `Usage Count: ${api.usageCount || 0}`
-                ]
-            };
-        });
-
-        const selectedIndex = await menu.selectFromList('Switch 3rd-party API', listItems, activeIndex);
-
-        if (selectedIndex === null) {
+        if (!selectedApi) {
             return showMenu();
         }
 
-        const selectedApi = apiManager.setActiveApi(selectedIndex);
+        // Find the index of the selected API
+        const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
+        const switchedApi = apiManager.setActiveApi(selectedIndex);
 
         console.clear();
         showSuccess('API switched successfully!', [
-            `Active API: ${selectedApi.name}`,
-            `Provider: ${selectedApi.provider}`,
-            `Base URL: ${selectedApi.baseUrl}`,
-            `Model: ${selectedApi.model}`
+            `Active API: ${switchedApi.name}`,
+            `Provider: ${switchedApi.provider}`,
+            `Base URL: ${switchedApi.baseUrl}`,
+            `Model: ${switchedApi.model}`
         ]);
 
     } catch (error) {
