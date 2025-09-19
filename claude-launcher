@@ -32,7 +32,26 @@ const { exec } = require('child_process');
 
 // Initialize components
 const apiManager = new ApiManager();
-const menu = new Menu();
+
+// Global menu objects to prevent screen flickering during navigation
+let globalMainMenu = null;
+let globalConfirmMenu = null;
+let globalApiManagementMenu = null;
+
+/**
+ * Initialize global menu objects to prevent recreation and screen flickering
+ */
+function initializeGlobalMenus() {
+    if (!globalMainMenu) {
+        globalMainMenu = new Menu();
+    }
+    if (!globalConfirmMenu) {
+        globalConfirmMenu = new Menu();
+    }
+    if (!globalApiManagementMenu) {
+        globalApiManagementMenu = new Menu();
+    }
+}
 
 /**
  * Get export directory path and create if not exists
@@ -467,13 +486,15 @@ async function confirmSkipPassword() {
     console.log(colors.gray + '• This decision cannot be undone' + colors.reset);
     console.log('');
 
-    const confirmMenu = new Menu();
-    confirmMenu.setOptions([
+    // Ensure global menus are initialized
+    initializeGlobalMenus();
+
+    globalConfirmMenu.setOptions([
         'I confirm to skip',
         'Reconsider, return to password setup'
     ]);
 
-    const choice = await confirmMenu.navigate();
+    const choice = await globalConfirmMenu.navigate();
 
     if (choice === 0) {
         try {
@@ -526,10 +547,12 @@ async function showApiManagementMenu() {
 
     menuOptions.push('Back to Main Menu');
 
-    const apiManagementMenu = new Menu();
-    apiManagementMenu.setOptions(menuOptions);
+    // Ensure global menus are initialized
+    initializeGlobalMenus();
 
-    const choice = await apiManagementMenu.navigate();
+    globalApiManagementMenu.setOptions(menuOptions);
+
+    const choice = await globalApiManagementMenu.navigate();
 
     // Handle menu choices based on current menu options
     if (choice === 0) { // Add New API
@@ -635,8 +658,11 @@ async function executeSelection(selectedIndex) {
  * Show main menu
  */
 async function showMenu() {
-    menu.setOptions(menuOptions);
-    const selection = await menu.navigate();
+    // Ensure global menus are initialized
+    initializeGlobalMenus();
+
+    globalMainMenu.setOptions(menuOptions);
+    const selection = await globalMainMenu.navigate();
 
     if (selection === -1) {
         console.log('');
@@ -855,6 +881,7 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-// Start the application
+// Initialize global menus and start the application
+initializeGlobalMenus();
 console.log(colors.dim + 'Claude Launcher v2.0.0 - Modular Edition' + colors.reset);
 showMenu();
