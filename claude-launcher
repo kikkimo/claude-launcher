@@ -299,6 +299,183 @@ async function viewStatistics() {
 }
 
 /**
+ * Get password input from user (masked)
+ */
+function getPasswordInput(prompt) {
+    return new Promise((resolve) => {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        // Hide input
+        process.stdin.on('keypress', (char, key) => {
+            if (key && key.name === 'return') {
+                return;
+            }
+            if (key && key.name === 'backspace') {
+                process.stdout.write('\b \b');
+            } else if (char) {
+                process.stdout.write('*');
+            }
+        });
+
+        rl.question(prompt, (password) => {
+            rl.close();
+            console.log(''); // New line after password input
+            resolve(password);
+        });
+    });
+}
+
+/**
+ * Handle first time password setup
+ */
+async function handleFirstTimePasswordSetup() {
+    while (true) {
+        // Clear screen and show header
+        console.clear();
+        console.log('');
+        console.log(colors.bright + colors.yellow + '🔐 First Time Import/Export Setup' + colors.reset);
+        console.log('');
+
+        // Show information
+        console.log(colors.cyan + 'Why password is needed:' + colors.reset);
+        console.log(colors.gray + '• Import/export features require password verification for user identity' + colors.reset);
+        console.log(colors.gray + '• Exported configurations are in plaintext format for cross-machine compatibility' + colors.reset);
+        console.log(colors.gray + '• Local configurations remain encrypted, password ensures only you can access them' + colors.reset);
+        console.log('');
+        console.log(colors.yellow + 'Options:' + colors.reset);
+        console.log(colors.gray + '• Set Password: Enable import/export functionality with identity verification' + colors.reset);
+        console.log(colors.gray + '• Skip Setup: Permanently disable import/export features (cannot be undone)' + colors.reset);
+        console.log('');
+        console.log(colors.red + 'WARNING: Skipping setup will permanently disable import/export functionality!' + colors.reset);
+        console.log('');
+
+        // Show menu options statically
+        console.log(colors.orange + '  ┌────────────────────────────────────────┐' + colors.reset);
+        console.log(colors.orange + '  │' + colors.white + colors.bright + '           Claude Code Launcher         ' + colors.orange + '│' + colors.reset);
+        console.log(colors.orange + '  └────────────────────────────────────────┘' + colors.reset);
+        console.log('');
+        console.log(colors.gray + '  Use number keys to select:' + colors.reset);
+        console.log('');
+        console.log(colors.yellow + '  1. ' + colors.reset + 'Set Password (Recommended)');
+        console.log(colors.yellow + '  2. ' + colors.reset + 'Skip Setup (Permanently Disable Import/Export)');
+        console.log(colors.gray + '  Any other key: ' + colors.reset + 'Back to Main Menu');
+        console.log('');
+
+        // Use simple input instead of Menu class to avoid refresh issues
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        const choice = await new Promise((resolve) => {
+            rl.question(colors.green + '[>] Enter your choice (1-2, or any other key to return to main menu): ' + colors.reset, (answer) => {
+                rl.close();
+                resolve(parseInt(answer) - 1);
+            });
+        });
+
+        switch (choice) {
+            case 0: // Set password
+                const passwordResult = await promptForPasswordSetup();
+                if (passwordResult) {
+                    return true; // Password set successfully
+                }
+                // If password setup failed, continue loop to show menu again
+                break;
+
+            case 1: // Skip setup
+                const skipResult = await confirmSkipPassword();
+                if (skipResult === true) {
+                    return true; // Skip confirmed
+                } else if (skipResult === 'reconsider') {
+                    continue; // Return to main setup menu
+                }
+                // If skip was canceled, continue loop
+                break;
+
+            case 2: // Back to main menu
+            default:
+                return false; // Exit setup
+        }
+    }
+}
+
+/**
+ * Prompt user to set password
+ */
+async function promptForPasswordSetup() {
+    console.log('');
+    console.log(colors.cyan + 'Set Import/Export Password:' + colors.reset);
+
+    const password = await getPasswordInput('Password: ');
+    if (!password) {
+        console.log(colors.red + 'Password cannot be empty' + colors.reset);
+        await waitForKey('Press any key to continue...');
+        return false;
+    }
+
+    const confirmPassword = await getPasswordInput('Confirm Password: ');
+    if (password !== confirmPassword) {
+        console.log(colors.red + 'Passwords do not match, please try again' + colors.reset);
+        await waitForKey('Press any key to continue...');
+        return false;
+    }
+
+    try {
+        apiManager.setExportPassword(password);
+        console.log(colors.green + '✓ Password set successfully!' + colors.reset);
+        await waitForKey('Press any key to continue...');
+        return true;
+    } catch (error) {
+        console.log(colors.red + `Failed to set password: ${error.message}` + colors.reset);
+        await waitForKey('Press any key to continue...');
+        return false;
+    }
+}
+
+/**
+ * Confirm skip password setup
+ */
+async function confirmSkipPassword() {
+    console.log('');
+    console.log(colors.bright + colors.red + '⚠️  Confirm Skip Password Setup' + colors.reset);
+    console.log('');
+    console.log(colors.gray + 'After skipping password setup:' + colors.reset);
+    console.log(colors.gray + '• Import/export functionality will be permanently disabled' + colors.reset);
+    console.log(colors.gray + '• Cannot backup or migrate API configurations' + colors.reset);
+    console.log(colors.gray + '• This decision cannot be undone' + colors.reset);
+    console.log('');
+
+    const confirmMenu = new Menu();
+    confirmMenu.setOptions([
+        'I confirm to skip',
+        'Reconsider, return to password setup'
+    ]);
+
+    const choice = await confirmMenu.navigate();
+
+    if (choice === 0) {
+        try {
+            apiManager.skipPasswordSetup();
+            console.log(colors.yellow + 'Password setup skipped, import/export functionality permanently disabled' + colors.reset);
+            await waitForKey('Press any key to continue...');
+            return true;
+        } catch (error) {
+            console.log(colors.red + `Operation failed: ${error.message}` + colors.reset);
+            await waitForKey('Press any key to continue...');
+            return false;
+        }
+    }
+
+    return 'reconsider'; // Return to password setup main menu
+}
+
+/**
  * Show API Management Menu
  */
 async function showApiManagementMenu() {
@@ -307,53 +484,62 @@ async function showApiManagementMenu() {
     console.log(colors.bright + colors.orange + '📋 3rd-party API Management' + colors.reset);
     console.log('');
 
-    const apiManagementMenu = new Menu();
-    apiManagementMenu.setOptions([
+    // Check if this is first time usage and prompt for password setup
+    if (apiManager.isFirstTimeUsage()) {
+        const passwordChoice = await handleFirstTimePasswordSetup();
+        if (!passwordChoice) {
+            // User chose to skip or canceled, return to main menu
+            return showMenu();
+        }
+    }
+
+    // Build menu options based on password setup status
+    const menuOptions = [
         'Add New API',
         'Remove API',
         'Switch Active API',
-        'View API Statistics',
-        'Export Configuration',
-        'Import Configuration',
-        'Export Password Settings',
-        'Back to Main Menu'
-    ]);
+        'View API Statistics'
+    ];
+
+    // Add import/export options only if password is set
+    if (apiManager.canUseImportExport()) {
+        menuOptions.push('Export Configuration');
+        menuOptions.push('Import Configuration');
+        menuOptions.push('Change Password');
+    }
+
+    menuOptions.push('Back to Main Menu');
+
+    const apiManagementMenu = new Menu();
+    apiManagementMenu.setOptions(menuOptions);
 
     const choice = await apiManagementMenu.navigate();
 
-    switch (choice) {
-        case 0: // Add New API
-            await addNewThirdPartyApi();
-            break;
-
-        case 1: // Remove API
-            await removeThirdPartyApi();
-            break;
-
-        case 2: // Switch Active API
-            await switchThirdPartyApi();
-            break;
-
-        case 3: // View API Statistics
-            await viewStatistics();
-            break;
-
-        case 4: // Export Configuration
+    // Handle menu choices based on current menu options
+    if (choice === 0) { // Add New API
+        await addNewThirdPartyApi();
+    } else if (choice === 1) { // Remove API
+        await removeThirdPartyApi();
+    } else if (choice === 2) { // Switch Active API
+        await switchThirdPartyApi();
+    } else if (choice === 3) { // View API Statistics
+        await viewStatistics();
+    } else if (apiManager.canUseImportExport()) {
+        // If import/export is available, handle those options
+        if (choice === 4) { // Export Configuration
             await exportConfiguration();
-            break;
-
-        case 5: // Import Configuration
+        } else if (choice === 5) { // Import Configuration
             await importConfiguration();
-            break;
-
-        case 6: // Export Password Settings
-            await manageExportPassword();
-            break;
-
-        case 7: // Back to Main Menu
-        default:
-            showMenu();
-            return;
+        } else if (choice === 6) { // Change Password
+            await changePassword();
+        } else if (choice === 7) { // Back to Main Menu
+            return showMenu();
+        }
+    } else {
+        // If import/export is not available, only Back to Main Menu
+        if (choice === 4) { // Back to Main Menu
+            return showMenu();
+        }
     }
 
     // Return to API management menu after completing action
@@ -634,103 +820,32 @@ async function exportConfiguration() {
     console.log(colors.bright + colors.orange + '💾 Export Configuration' + colors.reset);
     console.log('');
 
-    if (!apiManager.hasExportPassword()) {
-        console.log(colors.red + '❌ Export Not Available' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '🔑 Export password not set.' + colors.reset);
-        console.log('');
-        console.log(colors.gray + 'To use export/import features:' + colors.reset);
-        console.log(colors.gray + '1. Go to "Export Password Settings"' + colors.reset);
-        console.log(colors.gray + '2. Set an export password' + colors.reset);
-        console.log(colors.gray + '3. Return here to export your configuration' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '⚠️  Without export password:' + colors.reset);
-        console.log(colors.gray + '   • Configuration backup is not available' + colors.reset);
-        console.log(colors.gray + '   • Cannot transfer settings to other machines' + colors.reset);
-        console.log(colors.gray + '   • APIs remain secure with local-only encryption' + colors.reset);
-        console.log('');
-
-        const exportMenu = new Menu();
-        exportMenu.setOptions([
-            'Set Export Password Now',
-            'Back to API Management Menu'
-        ]);
-
-        const choice = await exportMenu.navigate();
-        if (choice === 0) {
-            await setOrChangeExportPassword(true);
-        }
-        return;
-    }
-
-    const apis = apiManager.getApis();
-    if (apis.length === 0) {
-        showInfo('No APIs configured', ['Please add at least one API before exporting']);
-        await waitForKey('Press any key to continue...');
-        return;
-    }
-
-    // Show security reminder
-    console.log(colors.cyan + `Current Status: [Export Password: Set ✓]` + colors.reset);
-    console.log('');
-    console.log(colors.yellow + '⚠️  Security Reminder:' + colors.reset);
-    console.log(colors.gray + '   • Export files contain your API keys encrypted with export password' + colors.reset);
-    console.log(colors.gray + '   • Keep export files secure - they contain sensitive information' + colors.reset);
-    console.log(colors.gray + '   • Export password cannot be recovered if forgotten' + colors.reset);
-    console.log('');
-
-    console.log(colors.cyan + 'Export Options:' + colors.reset);
-    console.log(colors.gray + '1. Export All APIs (Recommended)' + colors.reset);
-    console.log(colors.gray + '2. Export Selected APIs' + colors.reset);
-    console.log(colors.gray + '3. Export Configuration Structure Only (No API Keys)' + colors.reset);
-    console.log('');
-
-    const option = await simpleInput(colors.green + '[>] Choose option (1-3): ' + colors.reset);
-
-    // Verify export password
-    const password = await simpleInput(colors.green + '[>] Enter export password: ' + colors.reset);
-    if (!apiManager.verifyExportPassword(password)) {
-        showError('Export password verification failed');
-        return;
-    }
+    // Request password verification
+    const password = await getPasswordInput('Enter password to verify identity: ');
 
     try {
-        const filename = `claude-launcher-backup-${Date.now()}-encrypted.json`;
-        const filepath = path.join(process.cwd(), filename);
+        const exportData = apiManager.exportConfig(password);
 
-        let exportData;
-        switch (option) {
-            case '1':
-                exportData = apiManager.exportConfigWithPassword(password);
-                break;
-            case '2':
-                // TODO: Implement selective export
-                showInfo('Selective export feature coming soon');
-                return;
-            case '3':
-                exportData = apiManager.exportConfigStructureOnly();
-                break;
-            default:
-                showError('Invalid option selected');
-                return;
-        }
-
-        fs.writeFileSync(filepath, exportData);
-        showSuccess('Configuration exported successfully!', [
-            `📁 File: ${filename}`,
-            '🔒 Encryption: AES-256 with your export password',
-            '💾 Location: Current directory'
-        ]);
+        console.log(colors.green + '✓ Configuration exported successfully' + colors.reset);
+        console.log('');
+        console.log(colors.yellow + '📋 Exported Configuration Data:' + colors.reset);
+        console.log(colors.gray + '━'.repeat(50) + colors.reset);
+        console.log(exportData);
+        console.log(colors.gray + '━'.repeat(50) + colors.reset);
+        console.log('');
+        console.log(colors.cyan + 'Please copy the above content and save to a file' + colors.reset);
+        console.log(colors.gray + 'Recommended to save as .json file format' + colors.reset);
 
     } catch (error) {
-        showError('Export failed', [error.message]);
+        console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
     }
 
-    await waitForKey('Press any key to continue...');
+    console.log('');
+    await waitForKey('Press any key to return...');
 }
 
 /**
- * Import configuration with password decryption
+ * Import configuration from plaintext JSON
  */
 async function importConfiguration() {
     console.clear();
@@ -738,263 +853,94 @@ async function importConfiguration() {
     console.log(colors.bright + colors.orange + '📥 Import Configuration' + colors.reset);
     console.log('');
 
-    // Check if export password is set
-    if (!apiManager.hasExportPassword()) {
-        console.log(colors.red + '❌ Import Not Available' + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '🔑 Export password not set.' + colors.reset);
-        console.log('');
-        console.log(colors.gray + 'To use import functionality:' + colors.reset);
-        console.log(colors.gray + '1. Set an export password first' + colors.reset);
-        console.log(colors.gray + '2. Import requires the same password that was used for export' + colors.reset);
-        console.log('');
+    // Request password verification
+    const password = await getPasswordInput('Enter password to verify identity: ');
 
-        const importMenu = new Menu();
-        importMenu.setOptions([
-            'Set Export Password Now',
-            'Back to API Management Menu'
-        ]);
-
-        const choice = await importMenu.navigate();
-        if (choice === 0) {
-            await setOrChangeExportPassword(true);
-        }
-        return;
-    }
-
-    console.log(colors.yellow + '⚠️  Import Warning:' + colors.reset);
-    console.log(colors.gray + '   • Importing will merge with existing APIs' + colors.reset);
-    console.log(colors.gray + '   • Duplicates (same URL + Token + Model) will be skipped' + colors.reset);
-    console.log(colors.gray + '   • Original API settings will be preserved for duplicates' + colors.reset);
     console.log('');
+    console.log(colors.cyan + 'Please paste configuration JSON data:' + colors.reset);
+    console.log(colors.gray + '(Press Enter when done pasting)' + colors.reset);
 
-    console.log(colors.cyan + '📁 Import Methods:' + colors.reset);
-    console.log(colors.gray + '1. Auto-detect files in current directory' + colors.reset);
-    console.log(colors.gray + '2. Enter JSON file path manually' + colors.reset);
-    console.log('');
-
-    const methodChoice = await simpleInput(colors.green + '[>] Choose import method (1-2): ' + colors.reset);
-
-    let filePath;
-    let isEncrypted;
-
-    if (methodChoice === '1') {
-        // Auto-detect method
-        try {
-            const files = fs.readdirSync(process.cwd())
-                .filter(f => f.startsWith('claude-launcher-backup-') && f.endsWith('.json'))
-                .sort((a, b) => b.localeCompare(a)); // Sort by newest first
-
-            if (files.length === 0) {
-                showError('No backup files found in current directory', [
-                    'Please place your backup file in the current directory',
-                    'File name should start with "claude-launcher-backup-"'
-                ]);
-                await waitForKey('Press any key to continue...');
-                return;
-            }
-
-            console.log('');
-            console.log(colors.cyan + 'Detected files:' + colors.reset);
-            files.forEach((f, i) => {
-                const fileEncrypted = f.includes('encrypted');
-                const icon = fileEncrypted ? '🔒' : '📄';
-                const status = fileEncrypted ? '(Encrypted)' : '(Plain)';
-                console.log(colors.gray + `  ${i + 1}. ${icon} ${f} ${status}` + colors.reset);
-            });
-            console.log('');
-
-            const fileChoice = await simpleInput(colors.green + `[>] Select file (1-${files.length}): ` + colors.reset);
-            const fileIndex = parseInt(fileChoice) - 1;
-
-            if (fileIndex < 0 || fileIndex >= files.length) {
-                showError('Invalid file selection');
-                return;
-            }
-
-            const selectedFile = files[fileIndex];
-            filePath = path.join(process.cwd(), selectedFile);
-            isEncrypted = selectedFile.includes('encrypted');
-        } catch (error) {
-            showError('Failed to read directory', [error.message]);
-            return;
-        }
-    } else if (methodChoice === '2') {
-        // Manual path input
-        console.log('');
-        const inputPath = await simpleInput(colors.green + '[>] Enter full path to JSON file: ' + colors.reset);
-
-        if (!inputPath || inputPath.trim() === '') {
-            showError('No file path provided');
-            return;
-        }
-
-        filePath = inputPath.trim();
-
-        // Check if file exists
-        if (!fs.existsSync(filePath)) {
-            showError('File not found', [`Path: ${filePath}`]);
-            return;
-        }
-
-        // Check if it's a JSON file
-        if (!filePath.toLowerCase().endsWith('.json')) {
-            showError('File must be a JSON file', [`Path: ${filePath}`]);
-            return;
-        }
-
-        // Try to determine if encrypted by checking filename or content
-        isEncrypted = path.basename(filePath).includes('encrypted');
-    } else {
-        showError('Invalid method selection');
-        return;
-    }
-
-    try {
-        // Read and validate JSON file
-        const fileContent = fs.readFileSync(filePath, 'utf8');
-        let configData;
-
-        // Try to parse as JSON first to validate format
-        try {
-            const jsonTest = JSON.parse(fileContent);
-            // Check if it might be encrypted by looking for encrypted field
-            if (jsonTest.encrypted === true) {
-                isEncrypted = true;
-            }
-        } catch (error) {
-            showError('Invalid JSON file format', [
-                'File is not a valid JSON file',
-                error.message
-            ]);
-            return;
-        }
-
-        if (isEncrypted) {
-            console.log('');
-            console.log(colors.yellow + '🔑 Password Required:' + colors.reset);
-            const password = await simpleInput(colors.green + '[>] Enter export password: ' + colors.reset);
-
-            try {
-                configData = apiManager.importConfigWithPassword(fileContent, password);
-            } catch (error) {
-                showError('Failed to decrypt configuration file', [
-                    'Please check your export password',
-                    error.message
-                ]);
-                return;
-            }
-        } else {
-            try {
-                configData = JSON.parse(fileContent);
-
-                // Validate configuration structure
-                if (!configData.apis || !Array.isArray(configData.apis)) {
-                    showError('Invalid configuration file', [
-                        'Configuration file does not contain valid API data',
-                        'Expected: JSON object with "apis" array'
-                    ]);
-                    return;
-                }
-            } catch (error) {
-                showError('Invalid configuration file format', [error.message]);
-                return;
-            }
-        }
-
-        // Show import options
-        console.log('');
-        console.log(colors.cyan + 'Import Options:' + colors.reset);
-        console.log(colors.gray + '1. Import All APIs' + colors.reset);
-        console.log(colors.gray + '2. Preview APIs (Show what will be imported)' + colors.reset);
-        console.log(colors.gray + '3. Select Specific APIs' + colors.reset);
-        console.log(colors.gray + '4. Cancel Import' + colors.reset);
-        console.log('');
-
-        const importOption = await simpleInput(colors.green + '[>] Choose option (1-4): ' + colors.reset);
-
-        switch (importOption) {
-            case '1':
-                await performImport(configData);
-                break;
-            case '2':
-                await previewImport(configData);
-                break;
-            case '3':
-                showInfo('Selective import feature coming soon');
-                break;
-            case '4':
-            default:
-                showInfo('Import cancelled');
-                break;
-        }
-
-    } catch (error) {
-        showError('Import failed', [error.message]);
-    }
-
-    await waitForKey('Press any key to continue...');
-}
-
-/**
- * Perform the actual import of configuration
- */
-async function performImport(configData) {
-    try {
-        const result = apiManager.importConfig(configData);
-        showSuccess('Configuration imported successfully!', [
-            `Imported ${result.imported} APIs`,
-            `Skipped ${result.skipped} duplicates`,
-            `Total APIs: ${apiManager.getApis().length}`
-        ]);
-    } catch (error) {
-        showError('Import failed', [error.message]);
-    }
-}
-
-/**
- * Preview what will be imported
- */
-async function previewImport(configData) {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.cyan + '👁️  Import Preview' + colors.reset);
-    console.log('');
-
-    if (!configData.apis || configData.apis.length === 0) {
-        showInfo('No APIs found in configuration file');
-        return;
-    }
-
-    console.log(colors.cyan + `Found ${configData.apis.length} API(s) in backup:` + colors.reset);
-    console.log('');
-
-    configData.apis.forEach((api, index) => {
-        // Use the same duplicate check logic as import
-        const importToken = api.authToken === '***REQUIRES_MANUAL_INPUT***' ? '' : api.authToken;
-        const duplicate = apiManager.checkDuplicate(api.baseUrl, importToken, api.model);
-
-        const status = duplicate.isDuplicate ? '(Will be skipped - duplicate config)' : '(Will be imported)';
-        const statusColor = duplicate.isDuplicate ? colors.yellow : colors.green;
-
-        console.log(colors.gray + `  ${index + 1}. ${api.name || 'Unnamed API'}` + colors.reset);
-        console.log(colors.dim + `     Provider: ${api.provider || 'Unknown'}` + colors.reset);
-        console.log(colors.dim + `     Base URL: ${api.baseUrl}` + colors.reset);
-        console.log(colors.dim + `     Model: ${api.model || 'Unknown'}` + colors.reset);
-        console.log(statusColor + `     Status: ${status}` + colors.reset);
-        console.log('');
+    const readline = require('readline');
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
     });
 
-    const confirmed = await confirmAction('Proceed with import?');
-    if (confirmed) {
-        await performImport(configData);
-    } else {
-        showInfo('Import cancelled');
+    let configData = '';
+    rl.on('line', (line) => {
+        configData += line + '\n';
+    });
+
+    await new Promise((resolve) => {
+        rl.question('', () => {
+            rl.close();
+            resolve();
+        });
+    });
+
+    try {
+        const result = apiManager.importConfig(configData.trim(), password);
+
+        console.log(colors.green + '✓ Configuration imported successfully' + colors.reset);
+        console.log('');
+        console.log(colors.cyan + `Import Statistics:` + colors.reset);
+        console.log(colors.gray + `• Successfully imported: ${result.imported} APIs` + colors.reset);
+        console.log(colors.gray + `• Skipped duplicates: ${result.skipped} APIs` + colors.reset);
+
+    } catch (error) {
+        console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
     }
+
+    console.log('');
+    await waitForKey('Press any key to return...');
 }
 
 /**
- * Handle process termination
+ * Change password
+ */
+async function changePassword() {
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '🔑 Change Password' + colors.reset);
+    console.log('');
+
+    // Verify current password
+    const currentPassword = await getPasswordInput('Enter current password: ');
+    if (!apiManager.verifyExportPassword(currentPassword)) {
+        console.log(colors.red + '❌ Current password is incorrect' + colors.reset);
+        await waitForKey('Press any key to return...');
+        return;
+    }
+
+    // Set new password
+    const newPassword = await getPasswordInput('Enter new password: ');
+    if (!newPassword) {
+        console.log(colors.red + 'Password cannot be empty' + colors.reset);
+        await waitForKey('Press any key to return...');
+        return;
+    }
+
+    const confirmPassword = await getPasswordInput('Confirm new password: ');
+    if (newPassword !== confirmPassword) {
+        console.log(colors.red + 'Passwords do not match, please try again' + colors.reset);
+        await waitForKey('Press any key to return...');
+        return;
+    }
+
+    try {
+        apiManager.setExportPassword(newPassword);
+        console.log(colors.green + '✓ Password changed successfully!' + colors.reset);
+    } catch (error) {
+        console.log(colors.red + `Failed to change password: ${error.message}` + colors.reset);
+    }
+
+    await waitForKey('Press any key to return...');
+}
+
+// End of API Management functions
+
+/**
+ * Graceful shutdown handlers
  */
 process.on('SIGINT', () => {
     console.log('');
