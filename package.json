@@ -18,7 +18,7 @@
   },
   "files": [
     "claude-launcher",
-    "claude-launcher-template.env",
+    "lib/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
