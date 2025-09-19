@@ -5,6 +5,37 @@
  * A launcher for Claude Code with third-party API support
  */
 
+/**
+ * Force complete stdin reset to prevent navigation issues
+ */
+function forceStdinCleanup() {
+    try {
+        if (process.stdin.isTTY) {
+            // Force raw mode off first
+            process.stdin.setRawMode(false);
+
+            // Remove ALL event listeners
+            process.stdin.removeAllListeners();
+
+            // Pause stdin to reset state
+            process.stdin.pause();
+
+            // Resume and set to standard input mode
+            setTimeout(() => {
+                try {
+                    process.stdin.resume();
+                    process.stdin.setEncoding('utf8');
+                } catch (resumeError) {
+                    // Ignore resume errors
+                }
+            }, 50);
+        }
+    } catch (error) {
+        // Ignore all cleanup errors - continue execution
+    }
+}
+
+
 const ApiManager = require('./lib/api-manager');
 const Menu = require('./lib/ui/menu');
 const colors = require('./lib/ui/colors');
@@ -218,6 +249,9 @@ async function addNewThirdPartyApi() {
         }
 
     } catch (error) {
+        // Force cleanup stdin state to prevent navigation issues
+        forceStdinCleanup();
+
         // Check if user cancelled the operation
         const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
         if (error.message === cancelledMessage) {
@@ -237,63 +271,59 @@ async function addNewThirdPartyApi() {
  */
 async function removeThirdPartyApi() {
     try {
-        while (true) {
-            // Get fresh API list each iteration
-            const apis = apiManager.getApis();
-            const activeApi = apiManager.getActiveApi();
-            const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
+        // Get API list
+        const apis = apiManager.getApis();
+        const activeApi = apiManager.getActiveApi();
+        const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
-            // Show API selection table (handles no APIs case internally)
-            const selectedApi = await showApiSelectionTable(
-                apis,
-                i18n.tSync('ui.general.select_api_remove'),
-                'remove',
-                activeIndex
-            );
+        // Show API selection table (handles no APIs case internally)
+        const selectedApi = await showApiSelectionTable(
+            apis,
+            i18n.tSync('ui.general.select_api_remove'),
+            'remove',
+            activeIndex
+        );
 
-            if (!selectedApi) {
+        if (!selectedApi) {
+            return showMenu();
+        }
+
+        // Show confirmation dialog
+        const confirmed = await confirmDeletion(selectedApi);
+
+        if (confirmed) {
+            try {
+                // Find the index of the selected API in the current list
+                const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
+                apiManager.removeApi(selectedIndex);
+
+                console.clear();
+                showSuccess(await i18n.t('messages.success.api_removed'), [
+                    `${await i18n.t('api.actions.removed_info', selectedApi.name)}`,
+                    `${await i18n.t('api.details.provider')}: ${selectedApi.provider}`
+                ]);
+
+                // Show success message and return to main menu
+                const remainingApis = apiManager.getApis();
+                if (remainingApis.length === 0) {
+                    showInfo(await i18n.t('messages.info.all_apis_removed'));
+                }
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+                return showMenu();
+
+            } catch (removeError) {
+                showError(await i18n.t('errors.api.failed_remove', removeError.message));
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
                 return showMenu();
             }
-
-            // Show confirmation dialog
-            const confirmed = await confirmDeletion(selectedApi);
-
-            if (confirmed) {
-                try {
-                    // Find the index of the selected API in the current list
-                    const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
-                    apiManager.removeApi(selectedIndex);
-
-                    console.clear();
-                    showSuccess(await i18n.t('messages.success.api_removed'), [
-                        `${await i18n.t('api.actions.removed_info', selectedApi.name)}`,
-                        `${await i18n.t('api.details.provider')}: ${selectedApi.provider}`
-                    ]);
-
-                    // Check if there are more APIs to remove
-                    const remainingApis = apiManager.getApis();
-                    if (remainingApis.length === 0) {
-                        showInfo(await i18n.t('messages.info.all_apis_removed'));
-                        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                        return showMenu();
-                    } else {
-                        await waitForKey(await i18n.t('messages.prompts.press_any_key_remove'));
-                        // Continue the loop to show updated list
-                    }
-
-                } catch (removeError) {
-                    showError(await i18n.t('errors.api.failed_remove', removeError.message));
-                    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                    return showMenu();
-                }
-            } else {
-                showInfo(await i18n.t('messages.info.removal_cancelled'));
-                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                // Continue the loop to show the list again
-            }
+        } else {
+            showInfo(await i18n.t('messages.info.removal_cancelled'));
+            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+            return showMenu();
         }
 
     } catch (error) {
+        forceStdinCleanup();
         showError('Failed to remove API', [error.message]);
         await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
     }
@@ -321,6 +351,7 @@ async function switchThirdPartyApi() {
         return showMenu();
 
     } catch (error) {
+        forceStdinCleanup();
         showError(await i18n.t('errors.api.failed_switch', error.message));
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
         return showMenu();
@@ -406,31 +437,39 @@ async function handleFirstTimePasswordSetup() {
         console.log(colors.red + i18n.tSync('password.setup.warning_skip') + colors.reset);
         console.log('');
 
-        // Show menu options statically
-        console.log(colors.orange + '  ┌────────────────────────────────────────┐' + colors.reset);
-        console.log(colors.orange + '  │' + colors.white + colors.bright + '           Claude Code Launcher         ' + colors.orange + '│' + colors.reset);
-        console.log(colors.orange + '  └────────────────────────────────────────┘' + colors.reset);
-        console.log('');
-        console.log(colors.gray + '  ' + i18n.tSync('navigation.use_number_keys') + colors.reset);
-        console.log('');
-        console.log(colors.yellow + '  1. ' + colors.reset + i18n.tSync('password.setup.menu_set_password'));
-        console.log(colors.yellow + '  2. ' + colors.reset + i18n.tSync('password.setup.menu_skip_setup'));
-        console.log(colors.gray + '  ' + i18n.tSync('password.setup.menu_back') + colors.reset);
-        console.log('');
+        console.log(colors.gray + '按任意键继续...' + colors.reset);
 
-        // Use simple input instead of Menu class to avoid refresh issues
-        const readline = require('readline');
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
+        // Wait for user to read the information
+        await new Promise((resolve) => {
+            if (process.stdin.isTTY) {
+                process.stdin.setRawMode(true);
+                process.stdin.resume();
+                process.stdin.once('data', () => {
+                    try {
+                        process.stdin.setRawMode(false);
+                        process.stdin.pause();
+                    } catch (error) {
+                        // Ignore cleanup errors
+                    }
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
         });
 
-        const choice = await new Promise((resolve) => {
-            rl.question(colors.green + i18n.tSync('navigation.enter_choice_prompt') + colors.reset, (answer) => {
-                rl.close();
-                resolve(parseInt(answer) - 1);
-            });
-        });
+        // Now show the menu for selection
+        const menuOptions = [
+            i18n.tSync('password.setup.menu_set_password'),
+            i18n.tSync('password.setup.menu_skip_setup'),
+            i18n.tSync('menu.api_management.back')
+        ];
+
+        // Ensure global menus are initialized
+        initializeGlobalMenus();
+        globalConfirmMenu.setOptions(menuOptions);
+
+        const choice = await globalConfirmMenu.navigate();
 
         switch (choice) {
             case 0: // Set password
@@ -452,6 +491,7 @@ async function handleFirstTimePasswordSetup() {
                 break;
 
             case 2: // Back to main menu
+            case -1: // ESC pressed
             default:
                 return false; // Exit setup
         }
@@ -499,6 +539,7 @@ async function confirmSkipPassword() {
             await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return true;
         } catch (error) {
+            forceStdinCleanup();
             console.log(colors.red + `Operation failed: ${error.message}` + colors.reset);
             await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return false;
@@ -512,6 +553,9 @@ async function confirmSkipPassword() {
  * Show API Management Menu
  */
 async function showApiManagementMenu() {
+    // Force cleanup stdin state before showing API management menu
+    forceStdinCleanup();
+
     console.clear();
     console.log('');
     console.log(colors.bright + colors.orange + '📋 ' + await i18n.t('menu.api_management.title') + colors.reset);
@@ -553,20 +597,27 @@ async function showApiManagementMenu() {
     // Handle menu choices based on current menu options
     if (choice === 0) { // Add New API
         await addNewThirdPartyApi();
+        return showMenu();
     } else if (choice === 1) { // Remove API
         await removeThirdPartyApi();
+        return showMenu();
     } else if (choice === 2) { // Switch Active API
         await switchThirdPartyApi();
+        return showMenu();
     } else if (choice === 3) { // View API Statistics
         await viewStatistics();
+        return showMenu();
     } else if (apiManager.canUseImportExport()) {
         // If import/export is available, handle those options
         if (choice === 4) { // Export Configuration
             await exportConfiguration();
+            return showMenu();
         } else if (choice === 5) { // Import Configuration
             await importConfiguration();
+            return showMenu();
         } else if (choice === 6) { // Change Password
             await changePassword();
+            return showMenu();
         } else if (choice === 7) { // Back to Main Menu
             return showMenu();
         }
@@ -577,8 +628,8 @@ async function showApiManagementMenu() {
         }
     }
 
-    // Return to API management menu after completing action
-    showApiManagementMenu();
+    // Default fallback to main menu
+    return showMenu();
 }
 
 /**
@@ -635,12 +686,10 @@ async function executeSelection(selectedIndex) {
             break;
 
         case 4: // 3rd-party API Management
-            await showApiManagementMenu();
-            break;
+            return await showApiManagementMenu();
 
         case 5: // Language Settings
-            await showLanguageSettings();
-            break;
+            return await showLanguageSettings();
 
         case 6: // Exit
             console.log('');
@@ -658,6 +707,9 @@ async function executeSelection(selectedIndex) {
  * Show main menu
  */
 async function showMenu() {
+    // Force cleanup stdin state before showing main menu
+    forceStdinCleanup();
+
     // Ensure global menus are initialized
     initializeGlobalMenus();
 
@@ -743,6 +795,7 @@ async function exportConfiguration() {
         console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[1] + colors.reset);
 
     } catch (error) {
+        forceStdinCleanup();
         console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
     }
 
@@ -843,6 +896,7 @@ async function importConfiguration() {
             break; // Success, exit the loop
 
         } catch (error) {
+            forceStdinCleanup();
             console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
             if (attempts < maxAttempts) {
                 console.log(colors.yellow + i18n.tSync('ui.general.import_tips')[0] + colors.reset);
@@ -886,50 +940,49 @@ async function showLanguageSettings() {
         const currentLanguage = i18n.getCurrentLanguage();
         const currentLanguageName = i18n.getCurrentLanguageName();
 
-        while (true) {
-            console.clear();
-            console.log('');
-            console.log(colors.bright + colors.orange + '🌍 ' + await i18n.t('menu.language.title') + colors.reset);
-            console.log('');
+        console.clear();
+        console.log('');
+        console.log(colors.bright + colors.orange + '🌍 ' + await i18n.t('menu.language.title') + colors.reset);
+        console.log('');
 
-            // Show current language
-            console.log(colors.cyan + await i18n.t('menu.language.current', currentLanguageName) + colors.reset);
-            console.log('');
-            console.log(colors.yellow + await i18n.t('menu.language.select_prompt') + colors.reset);
-            console.log('');
+        // Show current language
+        console.log(colors.cyan + await i18n.t('menu.language.current', currentLanguageName) + colors.reset);
+        console.log('');
+        console.log(colors.yellow + await i18n.t('menu.language.select_prompt') + colors.reset);
+        console.log('');
 
-            // Create menu options
-            const languageOptions = [];
-            const languageCodes = Object.keys(supportedLanguages);
+        // Create menu options
+        const languageOptions = [];
+        const languageCodes = Object.keys(supportedLanguages);
 
-            languageCodes.forEach(langCode => {
-                const isActive = langCode === currentLanguage;
-                const displayName = supportedLanguages[langCode];
-                languageOptions.push(isActive ? `● ${displayName}` : `  ${displayName}`);
-            });
+        languageCodes.forEach(langCode => {
+            const isActive = langCode === currentLanguage;
+            const displayName = supportedLanguages[langCode];
+            languageOptions.push(isActive ? `● ${displayName}` : `  ${displayName}`);
+        });
 
-            languageOptions.push(await i18n.t('menu.language.back'));
+        languageOptions.push(await i18n.t('menu.language.back'));
 
-            // Ensure global menus are initialized
-            initializeGlobalMenus();
+        // Ensure global menus are initialized
+        initializeGlobalMenus();
 
-            globalApiManagementMenu.setOptions(languageOptions);
-            const choice = await globalApiManagementMenu.navigate();
+        globalApiManagementMenu.setOptions(languageOptions);
+        const choice = await globalApiManagementMenu.navigate();
 
-            if (choice === -1 || choice === languageOptions.length - 1) {
-                // Back to main menu
-                return showMenu();
-            }
+        if (choice === -1 || choice === languageOptions.length - 1) {
+            // Back to main menu
+            return showMenu();
+        }
 
-            // Check if user selected current language
-            const selectedLangCode = languageCodes[choice];
-            if (selectedLangCode === currentLanguage) {
-                // Already current language, continue loop
-                continue;
-            }
+        // Check if user selected current language
+        const selectedLangCode = languageCodes[choice];
+        if (selectedLangCode === currentLanguage) {
+            // Already current language, return to main menu
+            return showMenu();
+        }
 
-            // Switch language
-            console.clear();
+        // Switch language
+        console.clear();
             console.log('');
             console.log(colors.yellow + await i18n.t('status.switching_language') + colors.reset);
 
@@ -944,15 +997,14 @@ async function showLanguageSettings() {
 
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 
-                // Continue to show updated language settings
-                continue;
+                // Return to main menu after successful language change
+                return showMenu();
 
             } catch (error) {
                 showError(await i18n.t('errors.general.operation_failed', error.message));
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                continue;
+                return showMenu();
             }
-        }
 
     } catch (error) {
         showError('Failed to show language settings', [error.message]);
@@ -966,12 +1018,6 @@ async function showLanguageSettings() {
 /**
  * Graceful shutdown handlers
  */
-process.on('SIGINT', () => {
-    console.log('');
-    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
-    process.exit(0);
-});
-
 process.on('SIGTERM', () => {
     console.log('');
     console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
@@ -980,5 +1026,11 @@ process.on('SIGTERM', () => {
 
 // Initialize global menus and start the application
 initializeGlobalMenus();
+
+// Show version
+console.log('');
 console.log(colors.dim + i18n.tSync('ui.general.launcher_version') + colors.reset);
+console.log('');
+
+// Start the application
 showMenu();
