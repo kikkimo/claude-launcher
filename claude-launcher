@@ -265,9 +265,7 @@ async function removeThirdPartyApi() {
                         await waitForKey('Press any key to continue...');
                         return showMenu();
                     } else {
-                        console.log('');
-                        console.log(colors.gray + 'Press any key to continue selecting APIs to remove...' + colors.reset);
-                        await waitForKey();
+                        await waitForKey('Press any key to continue selecting APIs to remove...');
                         // Continue the loop to show updated list
                     }
 
@@ -278,9 +276,7 @@ async function removeThirdPartyApi() {
                 }
             } else {
                 showInfo('Removal cancelled');
-                console.log('');
-                console.log(colors.gray + 'Press any key to continue...' + colors.reset);
-                await waitForKey();
+                await waitForKey('Press any key to continue...');
                 // Continue the loop to show the list again
             }
         }
