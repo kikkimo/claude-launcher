@@ -23,6 +23,7 @@ const {
 } = require('./lib/launcher');
 const { getPasswordInput } = require('./lib/auth/password-input');
 const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
+const { maskApiToken } = require('./lib/validators');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
