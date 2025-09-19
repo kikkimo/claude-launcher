@@ -291,6 +291,12 @@ async function handleFirstTimePasswordSetup() {
         console.log(colors.gray + '• Exported configurations are in plaintext format for cross-machine compatibility' + colors.reset);
         console.log(colors.gray + '• Local configurations remain encrypted, password ensures only you can access them' + colors.reset);
         console.log('');
+        console.log(colors.cyan + '🔒 New Enhanced Security Requirements:' + colors.reset);
+        console.log(colors.gray + '• Password must be at least 6 characters long' + colors.reset);
+        console.log(colors.gray + '• Must contain at least 2 types: uppercase, lowercase, numbers, or special characters' + colors.reset);
+        console.log(colors.gray + '• ASCII characters only, no spaces allowed' + colors.reset);
+        console.log(colors.gray + '• Advanced protection against weak password patterns' + colors.reset);
+        console.log('');
         console.log(colors.yellow + 'Options:' + colors.reset);
         console.log(colors.gray + '• Set Password: Enable import/export functionality with identity verification' + colors.reset);
         console.log(colors.gray + '• Skip Setup: Permanently disable import/export features (cannot be undone)' + colors.reset);
