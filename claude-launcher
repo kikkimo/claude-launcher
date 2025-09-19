@@ -11,7 +11,6 @@ const colors = require('./lib/ui/colors');
 const {
     waitForKey,
     promptForThirdPartyApi,
-    promptForExportPasswordSetup,
     confirmAction,
     showSuccess,
     showError,
@@ -20,8 +19,7 @@ const {
 const {
     launchClaudeDefault,
     launchClaudeSkipPermissions,
-    launchClaudeWithApi,
-    testApiConnection
+    launchClaudeWithApi
 } = require('./lib/launcher');
 const { maskSensitiveData, maskApiToken } = require('./lib/validators');
 const fs = require('fs');
@@ -55,23 +53,7 @@ async function addNewThirdPartyApi() {
 
         const apiData = await promptForThirdPartyApi();
 
-        // Test connection before saving
-        console.log('');
-        const testResult = await testApiConnection({
-            baseUrl: apiData.baseUrl,
-            authToken: apiData.authToken
-        });
-
-        if (!testResult.success) {
-            const proceed = await confirmAction('⚠️  Connection test failed. Add anyway?');
-            if (!proceed) {
-                showInfo('API configuration cancelled');
-                await waitForKey('Press any key to return to main menu...');
-                return showMenu();
-            }
-        }
-
-        // Check if this is the first API and no export password is set
+        // Check if this is the first API
         const isFirstApi = apiManager.getApis().length === 0;
         const hasExportPassword = apiManager.hasExportPassword();
 
@@ -92,14 +74,6 @@ async function addNewThirdPartyApi() {
 
         if (isFirstApi) {
             showInfo('This is your first API - it has been set as active');
-
-            // Prompt for export password setup on first API
-            if (!hasExportPassword) {
-                const exportPassword = await promptForExportPasswordSetup();
-                if (exportPassword) {
-                    apiManager.setExportPassword(exportPassword);
-                }
-            }
         }
 
     } catch (error) {
@@ -179,17 +153,26 @@ async function removeThirdPartyApi() {
         const confirmed = await confirmAction('Are you sure you want to remove this API?');
 
         if (confirmed) {
-            apiManager.removeApi(selectedIndex);
-            showSuccess('API removed successfully!');
+            try {
+                apiManager.removeApi(selectedIndex);
+                showSuccess('API removed successfully!');
+                await waitForKey('Press any key to continue...');
+                return;
+            } catch (removeError) {
+                showError('Failed to remove API', [removeError.message]);
+                await waitForKey('Press any key to continue...');
+                return;
+            }
         } else {
             showInfo('Removal cancelled');
+            await waitForKey('Press any key to continue...');
+            return;
         }
 
     } catch (error) {
         showError('Failed to remove API', [error.message]);
+        await waitForKey('Press any key to continue...');
     }
-
-    await waitForKey('Press any key to continue...');
 }
 
 /**
