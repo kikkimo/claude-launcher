@@ -628,6 +628,9 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
             return showMenu();
         }
 
+        // Increment usage count for the active API since we're actually using it
+        apiManager.incrementActiveApiUsage();
+
         launchClaudeWithApi(activeApi, skipPermissions);
 
     } catch (error) {
