@@ -25,6 +25,7 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
+const i18n = require('./lib/i18n');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -183,15 +184,8 @@ function validateImportFile(filePath) {
     }
 }
 
-// Main menu options - simplified to 6 items
-const menuOptions = [
-    'Launch Claude Code',
-    'Launch Claude Code (Skip Permissions)',
-    'Launch Claude Code with 3rd-party API',
-    'Launch Claude Code with 3rd-party API (Skip Permissions)',
-    '3rd-party API Management',
-    'Exit'
-];
+// Main menu options - will be populated dynamically with i18n
+let menuOptions = [];
 
 /**
  * Add new third-party API
@@ -212,22 +206,22 @@ async function addNewThirdPartyApi() {
             apiData.provider
         );
 
-        showSuccess('Third-party API added successfully!', [
+        showSuccess(await i18n.t('messages.success.api_added'), [
             `Name: ${newApi.name}`,
-            `Provider: ${newApi.provider}`,
-            `Base URL: ${newApi.baseUrl}`,
-            `Model: ${newApi.model}`
+            `${await i18n.t('api.details.provider')}: ${newApi.provider}`,
+            `${await i18n.t('api.details.url')}: ${newApi.baseUrl}`,
+            `${await i18n.t('api.details.model')}: ${newApi.model}`
         ]);
 
         if (isFirstApi) {
-            showInfo('This is your first API - it has been set as active');
+            showInfo(await i18n.t('messages.info.first_time_usage'));
         }
 
     } catch (error) {
-        showError('Failed to add API', [error.message]);
+        showError(await i18n.t('errors.api.failed_add', error.message));
     }
 
-    await waitForKey('Press any key to continue...');
+    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 /**
@@ -240,10 +234,10 @@ async function removeThirdPartyApi() {
             const apis = apiManager.getApis();
 
             if (apis.length === 0) {
-                showInfo('No third-party APIs configured', [
-                    'All APIs have been removed or none were configured.'
+                showInfo(i18n.tSync('messages.info.no_apis_info_title'), [
+                    i18n.tSync('messages.info.apis_removed_or_none')
                 ]);
-                await waitForKey('Press any key to return to main menu...');
+                await waitForKey(i18n.tSync('messages.info.press_return_menu'));
                 return showMenu();
             }
 
@@ -253,7 +247,7 @@ async function removeThirdPartyApi() {
             // Show API selection table
             const selectedApi = await showApiSelectionTable(
                 apis,
-                '[!] Select API to remove:',
+                i18n.tSync('ui.general.select_api_remove'),
                 'remove',
                 activeIndex
             );
@@ -272,37 +266,37 @@ async function removeThirdPartyApi() {
                     apiManager.removeApi(selectedIndex);
 
                     console.clear();
-                    showSuccess('API removed successfully!', [
-                        `Removed: ${selectedApi.name}`,
-                        `Provider: ${selectedApi.provider}`
+                    showSuccess(await i18n.t('messages.success.api_removed'), [
+                        `${await i18n.t('api.actions.removed_info', selectedApi.name)}`,
+                        `${await i18n.t('api.details.provider')}: ${selectedApi.provider}`
                     ]);
 
                     // Check if there are more APIs to remove
                     const remainingApis = apiManager.getApis();
                     if (remainingApis.length === 0) {
-                        showInfo('All APIs have been removed');
-                        await waitForKey('Press any key to continue...');
+                        showInfo(await i18n.t('messages.info.all_apis_removed'));
+                        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
                         return showMenu();
                     } else {
-                        await waitForKey('Press any key to continue selecting APIs to remove...');
+                        await waitForKey(await i18n.t('messages.prompts.press_any_key_remove'));
                         // Continue the loop to show updated list
                     }
 
                 } catch (removeError) {
-                    showError('Failed to remove API', [removeError.message]);
-                    await waitForKey('Press any key to continue...');
+                    showError(await i18n.t('errors.api.failed_remove', removeError.message));
+                    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
                     return showMenu();
                 }
             } else {
-                showInfo('Removal cancelled');
-                await waitForKey('Press any key to continue...');
+                showInfo(await i18n.t('messages.info.removal_cancelled'));
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
                 // Continue the loop to show the list again
             }
         }
 
     } catch (error) {
         showError('Failed to remove API', [error.message]);
-        await waitForKey('Press any key to continue...');
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
     }
 }
 
@@ -331,18 +325,18 @@ async function switchThirdPartyApi() {
         const switchedApi = apiManager.setActiveApi(selectedIndex);
 
         console.clear();
-        showSuccess('API switched successfully!', [
-            `Active API: ${switchedApi.name}`,
-            `Provider: ${switchedApi.provider}`,
-            `Base URL: ${switchedApi.baseUrl}`,
-            `Model: ${switchedApi.model}`
+        showSuccess(await i18n.t('messages.success.api_switched'), [
+            `${await i18n.t('api.actions.switch_success', switchedApi.name)}`,
+            `${await i18n.t('api.details.provider')}: ${switchedApi.provider}`,
+            `${await i18n.t('api.details.url')}: ${switchedApi.baseUrl}`,
+            `${await i18n.t('api.details.model')}: ${switchedApi.model}`
         ]);
 
     } catch (error) {
-        showError('Failed to switch API', [error.message]);
+        showError(await i18n.t('errors.api.failed_switch', error.message));
     }
 
-    await waitForKey('Press any key to continue...');
+    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 /**
@@ -351,32 +345,41 @@ async function switchThirdPartyApi() {
 async function viewStatistics() {
     console.clear();
     console.log('');
-    console.log(colors.bright + colors.orange + '📊 API Statistics' + colors.reset);
+    console.log(colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset);
     console.log('');
 
     const stats = apiManager.getStatistics();
     const apis = apiManager.getApis();
 
-    console.log(colors.cyan + '  Summary:' + colors.reset);
-    console.log(colors.gray + `    Total APIs: ${stats.totalApis}` + colors.reset);
-    console.log(colors.gray + `    Active API: ${stats.activeApiName}` + colors.reset);
-    console.log(colors.gray + `    Most Used: ${stats.mostUsedApi}` + colors.reset);
-    console.log(colors.gray + `    Total Usage: ${stats.totalUsage}` + colors.reset);
+    console.log(colors.cyan + '  ' + i18n.tSync('ui.general.summary') + colors.reset);
+    console.log(colors.gray + `    ${await i18n.t('statistics.total_apis', stats.totalApis)}` + colors.reset);
+    console.log(colors.gray + `    ${await i18n.t('statistics.active_api', stats.activeApiName)}` + colors.reset);
+    console.log(colors.gray + `    ${await i18n.t('statistics.most_used', stats.mostUsedApi)}` + colors.reset);
+    console.log(colors.gray + `    ${await i18n.t('statistics.total_usage', stats.totalUsage)}` + colors.reset);
     console.log('');
 
     if (apis.length > 0) {
-        console.log(colors.cyan + '  Configured APIs:' + colors.reset);
+        console.log(colors.cyan + '  ' + i18n.tSync('ui.general.configured_apis') + colors.reset);
+
+        // Pre-fetch translations to avoid await in forEach
+        const currentlyActiveText = await i18n.t('api.details.currently_active');
+        const providerText = await i18n.t('api.details.provider');
+        const usageText = await i18n.t('api.details.usage');
+        const timesSuffixText = await i18n.t('api.details.times_suffix');
+        const createdAtText = await i18n.t('api.details.created_at');
+
         apis.forEach((api, index) => {
             const isActive = apiManager.getActiveApi()?.id === api.id;
-            console.log(colors.gray + `    ${index + 1}. ${api.name}${isActive ? ' (ACTIVE)' : ''}` + colors.reset);
-            console.log(colors.dim + `       Provider: ${api.provider}` + colors.reset);
-            console.log(colors.dim + `       Usage: ${api.usageCount || 0} times` + colors.reset);
-            console.log(colors.dim + `       Created: ${api.createdAt}` + colors.reset);
+            const activeText = isActive ? ` (${currentlyActiveText})` : '';
+            console.log(colors.gray + `    ${index + 1}. ${api.name}${activeText}` + colors.reset);
+            console.log(colors.dim + `       ${providerText}: ${api.provider}` + colors.reset);
+            console.log(colors.dim + `       ${usageText}: ${api.usageCount || 0} ${timesSuffixText}` + colors.reset);
+            console.log(colors.dim + `       ${createdAtText}: ${api.createdAt}` + colors.reset);
         });
     }
 
     console.log('');
-    await waitForKey('Press any key to continue...');
+    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 
@@ -388,26 +391,31 @@ async function handleFirstTimePasswordSetup() {
         // Clear screen and show header
         console.clear();
         console.log('');
-        console.log(colors.bright + colors.yellow + '🔐 First Time Import/Export Setup' + colors.reset);
+        console.log(colors.bright + colors.yellow + '🔐 ' + i18n.tSync('password.setup.first_time_title') + colors.reset);
         console.log('');
 
         // Show information
-        console.log(colors.cyan + 'Why password is needed:' + colors.reset);
-        console.log(colors.gray + '• Import/export features require password verification for user identity' + colors.reset);
-        console.log(colors.gray + '• Exported configurations are in plaintext format for cross-machine compatibility' + colors.reset);
-        console.log(colors.gray + '• Local configurations remain encrypted, password ensures only you can access them' + colors.reset);
+        console.log(colors.cyan + i18n.tSync('password.setup.why_needed') + colors.reset);
+        const whyNeededItems = i18n.tSync('password.setup.why_needed_items');
+        if (Array.isArray(whyNeededItems)) {
+            whyNeededItems.forEach(item => {
+                console.log(colors.gray + '• ' + item + colors.reset);
+            });
+        }
         console.log('');
-        console.log(colors.cyan + '🔒 New Enhanced Security Requirements:' + colors.reset);
-        console.log(colors.gray + '• Password must be at least 6 characters long' + colors.reset);
-        console.log(colors.gray + '• Must contain at least 2 types: uppercase, lowercase, numbers, or special characters' + colors.reset);
-        console.log(colors.gray + '• ASCII characters only, no spaces allowed' + colors.reset);
-        console.log(colors.gray + '• Advanced protection against weak password patterns' + colors.reset);
+        console.log(colors.cyan + '🔒 ' + i18n.tSync('password.setup.new_security_title') + colors.reset);
+        const securityItems = i18n.tSync('password.setup.security_items');
+        if (Array.isArray(securityItems)) {
+            securityItems.forEach(item => {
+                console.log(colors.gray + '• ' + item + colors.reset);
+            });
+        }
         console.log('');
-        console.log(colors.yellow + 'Options:' + colors.reset);
-        console.log(colors.gray + '• Set Password: Enable import/export functionality with identity verification' + colors.reset);
-        console.log(colors.gray + '• Skip Setup: Permanently disable import/export features (cannot be undone)' + colors.reset);
+        console.log(colors.yellow + i18n.tSync('password.setup.options_title') + colors.reset);
+        console.log(colors.gray + '• ' + i18n.tSync('password.setup.option_set') + colors.reset);
+        console.log(colors.gray + '• ' + i18n.tSync('password.setup.option_skip') + colors.reset);
         console.log('');
-        console.log(colors.red + 'WARNING: Skipping setup will permanently disable import/export functionality!' + colors.reset);
+        console.log(colors.red + i18n.tSync('password.setup.warning_skip') + colors.reset);
         console.log('');
 
         // Show menu options statically
@@ -415,11 +423,11 @@ async function handleFirstTimePasswordSetup() {
         console.log(colors.orange + '  │' + colors.white + colors.bright + '           Claude Code Launcher         ' + colors.orange + '│' + colors.reset);
         console.log(colors.orange + '  └────────────────────────────────────────┘' + colors.reset);
         console.log('');
-        console.log(colors.gray + '  Use number keys to select:' + colors.reset);
+        console.log(colors.gray + '  ' + i18n.tSync('navigation.use_number_keys') + colors.reset);
         console.log('');
-        console.log(colors.yellow + '  1. ' + colors.reset + 'Set Password (Recommended)');
-        console.log(colors.yellow + '  2. ' + colors.reset + 'Skip Setup (Permanently Disable Import/Export)');
-        console.log(colors.gray + '  Any other key: ' + colors.reset + 'Back to Main Menu');
+        console.log(colors.yellow + '  1. ' + colors.reset + i18n.tSync('password.setup.menu_set_password'));
+        console.log(colors.yellow + '  2. ' + colors.reset + i18n.tSync('password.setup.menu_skip_setup'));
+        console.log(colors.gray + '  ' + i18n.tSync('password.setup.menu_back') + colors.reset);
         console.log('');
 
         // Use simple input instead of Menu class to avoid refresh issues
@@ -430,7 +438,7 @@ async function handleFirstTimePasswordSetup() {
         });
 
         const choice = await new Promise((resolve) => {
-            rl.question(colors.green + '[>] Enter your choice (1-2, or any other key to return to main menu): ' + colors.reset, (answer) => {
+            rl.question(colors.green + i18n.tSync('navigation.enter_choice_prompt') + colors.reset, (answer) => {
                 rl.close();
                 resolve(parseInt(answer) - 1);
             });
@@ -468,7 +476,7 @@ async function handleFirstTimePasswordSetup() {
 async function promptForPasswordSetup() {
     const result = await setupNewPassword(apiManager, true);
     if (result) {
-        await waitForKey('Press any key to continue...');
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
     }
     return result;
 }
@@ -478,20 +486,20 @@ async function promptForPasswordSetup() {
  */
 async function confirmSkipPassword() {
     console.log('');
-    console.log(colors.bright + colors.red + '⚠️  Confirm Skip Password Setup' + colors.reset);
+    console.log(colors.bright + colors.red + '⚠️  ' + i18n.tSync('errors.password.confirm_skip_title') + colors.reset);
     console.log('');
-    console.log(colors.gray + 'After skipping password setup:' + colors.reset);
-    console.log(colors.gray + '• Import/export functionality will be permanently disabled' + colors.reset);
-    console.log(colors.gray + '• Cannot backup or migrate API configurations' + colors.reset);
-    console.log(colors.gray + '• This decision cannot be undone' + colors.reset);
+    console.log(colors.gray + i18n.tSync('ui.general.after_skipping_password_setup') + colors.reset);
+    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[0] + colors.reset);
+    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[1] + colors.reset);
+    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[2] + colors.reset);
     console.log('');
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
 
     globalConfirmMenu.setOptions([
-        'I confirm to skip',
-        'Reconsider, return to password setup'
+        i18n.tSync('ui.general.confirm_skip_option'),
+        i18n.tSync('ui.general.reconsider_option')
     ]);
 
     const choice = await globalConfirmMenu.navigate();
@@ -499,12 +507,12 @@ async function confirmSkipPassword() {
     if (choice === 0) {
         try {
             apiManager.skipPasswordSetup();
-            console.log(colors.yellow + 'Password setup skipped, import/export functionality permanently disabled' + colors.reset);
-            await waitForKey('Press any key to continue...');
+            console.log(colors.yellow + i18n.tSync('errors.password.setup_skipped') + colors.reset);
+            await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return true;
         } catch (error) {
             console.log(colors.red + `Operation failed: ${error.message}` + colors.reset);
-            await waitForKey('Press any key to continue...');
+            await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return false;
         }
     }
@@ -518,7 +526,7 @@ async function confirmSkipPassword() {
 async function showApiManagementMenu() {
     console.clear();
     console.log('');
-    console.log(colors.bright + colors.orange + '📋 3rd-party API Management' + colors.reset);
+    console.log(colors.bright + colors.orange + '📋 ' + await i18n.t('menu.api_management.title') + colors.reset);
     console.log('');
 
     // Check if this is first time usage and prompt for password setup
@@ -532,20 +540,20 @@ async function showApiManagementMenu() {
 
     // Build menu options based on password setup status
     const menuOptions = [
-        'Add New API',
-        'Remove API',
-        'Switch Active API',
-        'View API Statistics'
+        await i18n.t('menu.api_management.add_new'),
+        await i18n.t('menu.api_management.remove'),
+        await i18n.t('menu.api_management.switch'),
+        await i18n.t('menu.api_management.statistics')
     ];
 
     // Add import/export options only if password is set
     if (apiManager.canUseImportExport()) {
-        menuOptions.push('Export Configuration');
-        menuOptions.push('Import Configuration');
-        menuOptions.push('Change Password');
+        menuOptions.push(await i18n.t('menu.api_management.export'));
+        menuOptions.push(await i18n.t('menu.api_management.import'));
+        menuOptions.push(await i18n.t('menu.api_management.change_password'));
     }
 
-    menuOptions.push('Back to Main Menu');
+    menuOptions.push(await i18n.t('menu.api_management.back'));
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
@@ -594,12 +602,12 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
 
         if (!activeApi) {
             console.clear();
-            showInfo('No Active Third-party API', [
-                'No third-party API is currently active.',
-                'Please add and configure an API first, or switch to an existing one.'
+            showInfo(i18n.tSync('launch.no_active_api'), [
+                i18n.tSync('launch.no_active_api_desc'),
+                i18n.tSync('launch.add_configure_first')
             ]);
 
-            await waitForKey('Press any key to return to main menu...');
+            await waitForKey(i18n.tSync('launch.press_key_return'));
             return showMenu();
         }
 
@@ -642,9 +650,13 @@ async function executeSelection(selectedIndex) {
             await showApiManagementMenu();
             break;
 
-        case 5: // Exit
+        case 5: // Language Settings
+            await showLanguageSettings();
+            break;
+
+        case 6: // Exit
             console.log('');
-            console.log(colors.green + '👋 Goodbye!' + colors.reset);
+            console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
             process.exit(0);
             break;
 
@@ -661,12 +673,23 @@ async function showMenu() {
     // Ensure global menus are initialized
     initializeGlobalMenus();
 
+    // Populate menu options dynamically with i18n translations
+    menuOptions = [
+        await i18n.t('menu.main.launch_default'),
+        await i18n.t('menu.main.launch_skip'),
+        await i18n.t('menu.main.launch_api'),
+        await i18n.t('menu.main.launch_api_skip'),
+        await i18n.t('menu.main.api_management'),
+        await i18n.t('menu.main.language_settings'),
+        await i18n.t('menu.main.exit')
+    ];
+
     globalMainMenu.setOptions(menuOptions);
     const selection = await globalMainMenu.navigate();
 
     if (selection === -1) {
         console.log('');
-        console.log(colors.green + '👋 Goodbye!' + colors.reset);
+        console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
         process.exit(0);
     } else {
         await executeSelection(selection);
@@ -687,18 +710,18 @@ async function exportConfiguration() {
     console.log('');
 
     // Add export function description
-    console.log(colors.cyan + '📄 Export Function Description:' + colors.reset);
-    console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
-    console.log(colors.gray + '  • Export saves a JSON file to your home directory' + colors.reset);
-    console.log(colors.gray + '  • File contains plaintext API configurations for easy migration' + colors.reset);
-    console.log(colors.gray + '  • File will be automatically opened after export' + colors.reset);
+    console.log(colors.cyan + '📄 ' + i18n.tSync('import_export.export.description_title') + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[1] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[2] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[3] + colors.reset);
     console.log('');
 
     // Verify password before export
     const verified = await verifyExportPassword(apiManager, 'export');
     if (!verified) {
         console.log('');
-        await waitForKey('Press any key to return...');
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
         return;
     }
 
@@ -714,29 +737,29 @@ async function exportConfiguration() {
         // Write JSON file
         fs.writeFileSync(filePath, exportData, 'utf8');
 
-        console.log(colors.green + '✓ Configuration exported successfully!' + colors.reset);
+        console.log(colors.green + '✓ ' + i18n.tSync('import_export.export.success_title') + colors.reset);
         console.log('');
-        console.log(colors.cyan + '📁 Export Details:' + colors.reset);
-        console.log(colors.gray + `  • File saved to: ${filePath}` + colors.reset);
-        console.log(colors.gray + `  • Export directory: ${exportDir}` + colors.reset);
-        console.log(colors.gray + `  • Filename: ${filename}` + colors.reset);
+        console.log(colors.cyan + '📁 ' + i18n.tSync('import_export.export.details_title') + colors.reset);
+        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_file_saved', filePath) + colors.reset);
+        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_export_dir', exportDir) + colors.reset);
+        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_filename', filename) + colors.reset);
         console.log('');
 
         // Open file with default application
-        console.log(colors.yellow + '🔍 Opening exported file with default application...' + colors.reset);
+        console.log(colors.yellow + '🔍 ' + i18n.tSync('import_export.export.opening_file') + colors.reset);
         openFileWithDefault(filePath);
 
         console.log('');
-        console.log(colors.cyan + '💡 Tips:' + colors.reset);
-        console.log(colors.gray + '  • Share this file to migrate configurations to other machines' + colors.reset);
-        console.log(colors.gray + '  • Keep the file secure as it contains your API configurations' + colors.reset);
+        console.log(colors.cyan + '💡 ' + i18n.tSync('import_export.export.tips_title') + colors.reset);
+        console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[0] + colors.reset);
+        console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[1] + colors.reset);
 
     } catch (error) {
         console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
     }
 
     console.log('');
-    await waitForKey('Press any key to return...');
+    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
 }
 
 /**
@@ -749,25 +772,25 @@ async function importConfiguration() {
     console.log('');
 
     // Add import function description
-    console.log(colors.cyan + '📄 Import Function Description:' + colors.reset);
-    console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
-    console.log(colors.gray + '  • Import reads a JSON file from the specified file path' + colors.reset);
-    console.log(colors.gray + '  • Import data will be merged with current configuration (no overwrite)' + colors.reset);
-    console.log(colors.gray + '  • Duplicate API configurations will be automatically skipped' + colors.reset);
+    console.log(colors.cyan + '📄 ' + i18n.tSync('ui.general.import_function_description') + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[0] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[1] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[2] + colors.reset);
     console.log('');
 
     // Verify password identity
     const passwordVerified = await verifyExportPassword(apiManager, 'import');
     if (!passwordVerified) {
-        await waitForKey('Press any key to return...');
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
         return;
     }
 
     console.log('');
-    console.log(colors.cyan + '📁 File Input Required:' + colors.reset);
-    console.log(colors.gray + '  • Provide the full path to your JSON configuration file' + colors.reset);
-    console.log(colors.gray + '  • File must be a valid JSON file with .json extension' + colors.reset);
-    console.log(colors.gray + '  • File will be validated before import' + colors.reset);
+    console.log(colors.cyan + '📁 ' + i18n.tSync('ui.general.file_input_required') + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[0] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[1] + colors.reset);
+    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[2] + colors.reset);
     console.log('');
 
     const { simpleInput } = require('./lib/ui/prompts');
@@ -779,70 +802,72 @@ async function importConfiguration() {
         attempts++;
 
         // Get file path from user
-        const filePath = await simpleInput(colors.green + `[>] Enter JSON file path (attempt ${attempts}/${maxAttempts}): ` + colors.reset);
+        const filePrompt = i18n.tSync('ui.general.enter_json_file_path_attempt', attempts, maxAttempts);
+        const filePath = await simpleInput(colors.green + filePrompt + colors.reset);
 
         if (!filePath) {
-            console.log(colors.red + 'File path cannot be empty' + colors.reset);
+            console.log(colors.red + i18n.tSync('ui.general.file_path_empty') + colors.reset);
             if (attempts < maxAttempts) {
                 console.log('');
                 continue;
             } else {
-                console.log(colors.red + 'Maximum attempts reached. Import cancelled.' + colors.reset);
-                await waitForKey('Press any key to return...');
+                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset);
+                await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
                 return;
             }
         }
 
         // Validate file
         console.log('');
-        console.log(colors.yellow + '🔍 Validating file...' + colors.reset);
+        console.log(colors.yellow + i18n.tSync('ui.general.validating_file') + colors.reset);
         const validation = validateImportFile(filePath);
 
         if (!validation.valid) {
-            console.log(colors.red + `❌ File validation failed: ${validation.error}` + colors.reset);
+            console.log(colors.red + '❌ ' + i18n.tSync('ui.general.file_validation_failed', validation.error) + colors.reset);
             if (attempts < maxAttempts) {
-                console.log(colors.yellow + '💡 Please check the file path and ensure it\'s a valid JSON file' + colors.reset);
+                console.log(colors.yellow + i18n.tSync('ui.general.check_file_path_json') + colors.reset);
                 console.log('');
                 continue;
             } else {
-                console.log(colors.red + 'Maximum attempts reached. Import cancelled.' + colors.reset);
-                await waitForKey('Press any key to return...');
+                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset);
+                await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
                 return;
             }
         }
 
         // File is valid, proceed with import
-        console.log(colors.green + '✓ File validation successful' + colors.reset);
+        console.log(colors.green + i18n.tSync('ui.general.file_validation_successful') + colors.reset);
         console.log('');
 
         try {
             // Import the validated configuration data
             const result = apiManager.importConfigAuthenticated(validation.data);
 
-            console.log(colors.green + '✓ Configuration imported successfully!' + colors.reset);
+            console.log(colors.green + i18n.tSync('ui.general.import_successful') + colors.reset);
             console.log('');
-            console.log(colors.cyan + '📊 Import Statistics:' + colors.reset);
-            console.log(colors.gray + `  • Successfully imported: ${result.imported} API configurations` + colors.reset);
-            console.log(colors.gray + `  • Skipped duplicates: ${result.skipped} API configurations` + colors.reset);
-            console.log(colors.gray + `  • Configuration merged with existing data` + colors.reset);
-            console.log(colors.gray + `  • Source file: ${path.resolve(filePath)}` + colors.reset);
+            console.log(colors.cyan + i18n.tSync('ui.general.import_statistics') + colors.reset);
+            const importItems = i18n.tSync('ui.general.import_stats_items');
+            console.log(colors.gray + `  • ` + importItems[0].replace('{0}', result.imported) + colors.reset);
+            console.log(colors.gray + `  • ` + importItems[1].replace('{1}', result.skipped) + colors.reset);
+            console.log(colors.gray + `  • ` + importItems[2] + colors.reset);
+            console.log(colors.gray + `  • ` + importItems[3].replace('{0}', path.resolve(filePath)) + colors.reset);
 
             break; // Success, exit the loop
 
         } catch (error) {
             console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
             if (attempts < maxAttempts) {
-                console.log(colors.yellow + '💡 Please check the file content and format' + colors.reset);
+                console.log(colors.yellow + i18n.tSync('ui.general.import_tips')[0] + colors.reset);
                 console.log('');
                 continue;
             } else {
-                console.log(colors.red + 'Maximum attempts reached. Import failed.' + colors.reset);
+                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_failed') + colors.reset);
             }
         }
     }
 
     console.log('');
-    await waitForKey('Press any key to return...');
+    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
 }
 
 /**
@@ -851,7 +876,7 @@ async function importConfiguration() {
 async function changePassword() {
     console.clear();
     console.log('');
-    console.log(colors.bright + colors.orange + '🔑 Change Password' + colors.reset);
+    console.log(colors.bright + colors.orange + '🔑 ' + i18n.tSync('errors.password.change_password_title') + colors.reset);
     console.log('');
 
     // Use unified password change module
@@ -861,7 +886,91 @@ async function changePassword() {
         console.log('');
     }
 
-    await waitForKey('Press any key to return...');
+    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+}
+
+/**
+ * Show language settings menu
+ */
+async function showLanguageSettings() {
+    try {
+        const supportedLanguages = i18n.getSupportedLanguages();
+        const currentLanguage = i18n.getCurrentLanguage();
+        const currentLanguageName = i18n.getCurrentLanguageName();
+
+        while (true) {
+            console.clear();
+            console.log('');
+            console.log(colors.bright + colors.orange + '🌍 ' + await i18n.t('menu.language.title') + colors.reset);
+            console.log('');
+
+            // Show current language
+            console.log(colors.cyan + await i18n.t('menu.language.current', currentLanguageName) + colors.reset);
+            console.log('');
+            console.log(colors.yellow + await i18n.t('menu.language.select_prompt') + colors.reset);
+            console.log('');
+
+            // Create menu options
+            const languageOptions = [];
+            const languageCodes = Object.keys(supportedLanguages);
+
+            languageCodes.forEach(langCode => {
+                const isActive = langCode === currentLanguage;
+                const displayName = supportedLanguages[langCode];
+                languageOptions.push(isActive ? `● ${displayName}` : `  ${displayName}`);
+            });
+
+            languageOptions.push(await i18n.t('menu.language.back'));
+
+            // Ensure global menus are initialized
+            initializeGlobalMenus();
+
+            globalApiManagementMenu.setOptions(languageOptions);
+            const choice = await globalApiManagementMenu.navigate();
+
+            if (choice === -1 || choice === languageOptions.length - 1) {
+                // Back to main menu
+                return showMenu();
+            }
+
+            // Check if user selected current language
+            const selectedLangCode = languageCodes[choice];
+            if (selectedLangCode === currentLanguage) {
+                // Already current language, continue loop
+                continue;
+            }
+
+            // Switch language
+            console.clear();
+            console.log('');
+            console.log(colors.yellow + await i18n.t('status.switching_language') + colors.reset);
+
+            try {
+                await i18n.setLanguage(selectedLangCode);
+
+                console.clear();
+                const newLanguageName = i18n.getCurrentLanguageName();
+                showSuccess(await i18n.t('messages.success.language_changed'), [
+                    await i18n.t('menu.language.changed_success', newLanguageName)
+                ]);
+
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+
+                // Continue to show updated language settings
+                continue;
+
+            } catch (error) {
+                showError(await i18n.t('errors.general.operation_failed', error.message));
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+                continue;
+            }
+        }
+
+    } catch (error) {
+        showError('Failed to show language settings', [error.message]);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+        return showMenu();
+    }
 }
 
 // End of API Management functions
@@ -871,17 +980,17 @@ async function changePassword() {
  */
 process.on('SIGINT', () => {
     console.log('');
-    console.log(colors.green + '👋 Goodbye!' + colors.reset);
+    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
     console.log('');
-    console.log(colors.green + '👋 Goodbye!' + colors.reset);
+    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
     process.exit(0);
 });
 
 // Initialize global menus and start the application
 initializeGlobalMenus();
-console.log(colors.dim + 'Claude Launcher v2.0.0 - Modular Edition' + colors.reset);
+console.log(colors.dim + i18n.tSync('ui.general.launcher_version') + colors.reset);
 showMenu();
