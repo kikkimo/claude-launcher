@@ -21,9 +21,6 @@ const {
     launchClaudeSkipPermissions,
     launchClaudeWithApi
 } = require('./lib/launcher');
-const { maskSensitiveData, maskApiToken } = require('./lib/validators');
-const fs = require('fs');
-const path = require('path');
 
 // Initialize components
 const apiManager = new ApiManager();
@@ -44,13 +41,6 @@ const menuOptions = [
  */
 async function addNewThirdPartyApi() {
     try {
-        // Clean up terminal state
-        if (process.stdin.isTTY) {
-            process.stdin.setRawMode(false);
-            process.stdin.removeAllListeners('data');
-            process.stdin.pause();
-        }
-
         const apiData = await promptForThirdPartyApi();
 
         // Check if this is the first API
@@ -611,188 +601,9 @@ async function showMenu() {
     }
 }
 
-/**
- * Manage export password settings
- */
-async function manageExportPassword() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '🔑 Export Password Settings' + colors.reset);
-    console.log('');
 
-    const hasPassword = apiManager.hasExportPassword();
 
-    console.log(colors.cyan + `Current Status: ${hasPassword ? '[Password Set ✓]' : '[No Password Set ✗]'}` + colors.reset);
-    console.log('');
 
-    const passwordMenu = new Menu();
-    const menuOptions = [];
-
-    if (!hasPassword) {
-        menuOptions.push('Set Export Password (First Time)');
-    } else {
-        menuOptions.push('Change Export Password');
-        menuOptions.push('Remove Export Password (Disable Export)');
-        menuOptions.push('Test Password (Verify Current Password)');
-    }
-    menuOptions.push('Back to API Management');
-
-    passwordMenu.setOptions(menuOptions);
-
-    if (hasPassword) {
-        console.log(colors.yellow + '⚠️  WARNING: Changing or removing password will make existing' + colors.reset);
-        console.log(colors.yellow + '    export files inaccessible with the new settings.' + colors.reset);
-        console.log('');
-    }
-
-    const choice = await passwordMenu.navigate();
-
-    // Handle menu selection based on current state
-    const actualChoice = !hasPassword ? choice : choice;
-
-    switch (actualChoice) {
-        case 0: // Set/Change Export Password
-            await setOrChangeExportPassword(!hasPassword);
-            break;
-
-        case 1: // Remove Password or Back (depending on state)
-            if (hasPassword) {
-                await removeExportPassword();
-            }
-            break;
-
-        case 2: // Test Password or Back (depending on state)
-            if (hasPassword) {
-                await testExportPassword();
-            }
-            break;
-
-        case 3: // Back (only when has password)
-        default:
-            return; // Direct return without waiting for key
-    }
-
-    await waitForKey('Press any key to continue...');
-}
-
-/**
- * Set or change export password
- */
-async function setOrChangeExportPassword(isFirstTime) {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + (isFirstTime ? '🔑 Set Export Password' : '🔑 Change Export Password') + colors.reset);
-    console.log('');
-
-    // Show detailed warning
-    console.log(colors.yellow + '🚨 CRITICAL WARNING:' + colors.reset);
-    console.log(colors.red + '   • If you forget your export password, it CANNOT be recovered' + colors.reset);
-    console.log(colors.red + '   • You will lose access to all exported configuration files' + colors.reset);
-    console.log(colors.red + '   • You\'ll need to manually reconfigure APIs on new machines' + colors.reset);
-    console.log(colors.red + '   • Choose a password you can remember or store securely' + colors.reset);
-    console.log('');
-
-    console.log(colors.cyan + '📝 Password Requirements:' + colors.reset);
-    console.log(colors.gray + '   • Minimum 8 characters recommended' + colors.reset);
-    console.log(colors.gray + '   • Mix of letters, numbers, and symbols preferred' + colors.reset);
-    console.log(colors.gray + '   • Store this password in a safe place (password manager)' + colors.reset);
-    console.log('');
-
-    if (!isFirstTime) {
-        // Verify current password first
-        const currentPassword = await simpleInput(colors.green + '[>] Enter current export password: ' + colors.reset);
-        if (!apiManager.verifyExportPassword(currentPassword)) {
-            showError('Current password verification failed');
-            return;
-        }
-    }
-
-    // Get new password
-    const newPassword = await simpleInput(colors.green + '[>] Enter new export password: ' + colors.reset);
-    if (newPassword.length < 8) {
-        showError('Password should be at least 8 characters');
-        return;
-    }
-
-    const confirmPassword = await simpleInput(colors.green + '[>] Confirm new password: ' + colors.reset);
-    if (newPassword !== confirmPassword) {
-        showError('Passwords do not match');
-        return;
-    }
-
-    try {
-        apiManager.setExportPassword(newPassword);
-        showSuccess(isFirstTime ? 'Export password set successfully!' : 'Export password changed successfully!', [
-            'You can now use export/import features',
-            '⚠️  Remember: This password cannot be recovered if forgotten'
-        ]);
-    } catch (error) {
-        showError('Failed to set export password', [error.message]);
-    }
-}
-
-/**
- * Remove export password
- */
-async function removeExportPassword() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.red + '⚠️  Remove Export Password' + colors.reset);
-    console.log('');
-
-    console.log(colors.red + '🚨 WARNING: This will:' + colors.reset);
-    console.log(colors.gray + '   • Disable export/import functionality' + colors.reset);
-    console.log(colors.gray + '   • Make existing export files unusable' + colors.reset);
-    console.log(colors.gray + '   • Cannot be undone without setting a new password' + colors.reset);
-    console.log('');
-
-    const confirmed = await confirmAction('Are you sure you want to remove the export password?');
-    if (!confirmed) {
-        showInfo('Export password removal cancelled');
-        return;
-    }
-
-    // Verify current password
-    const currentPassword = await simpleInput(colors.green + '[>] Enter current export password to confirm: ' + colors.reset);
-    if (!apiManager.verifyExportPassword(currentPassword)) {
-        showError('Password verification failed - removal cancelled');
-        return;
-    }
-
-    try {
-        apiManager.removeExportPassword();
-        showSuccess('Export password removed successfully!', [
-            'Export/import features are now disabled',
-            'You can set a new password anytime to re-enable these features'
-        ]);
-    } catch (error) {
-        showError('Failed to remove export password', [error.message]);
-    }
-}
-
-/**
- * Test export password
- */
-async function testExportPassword() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.cyan + '🔍 Test Export Password' + colors.reset);
-    console.log('');
-
-    const password = await simpleInput(colors.green + '[>] Enter export password to verify: ' + colors.reset);
-
-    if (apiManager.verifyExportPassword(password)) {
-        showSuccess('Password verification successful!', [
-            'Your export password is correct',
-            'You can safely use export/import features'
-        ]);
-    } else {
-        showError('Password verification failed', [
-            'The entered password is incorrect',
-            'Please check your password and try again'
-        ]);
-    }
-}
 
 /**
  * Export configuration with password encryption
