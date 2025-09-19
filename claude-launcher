@@ -21,6 +21,8 @@ const {
     launchClaudeSkipPermissions,
     launchClaudeWithApi
 } = require('./lib/launcher');
+const { getPasswordInput } = require('./lib/auth/password-input');
+const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 
 // Initialize components
 const apiManager = new ApiManager();
@@ -271,36 +273,6 @@ async function viewStatistics() {
     await waitForKey('Press any key to continue...');
 }
 
-/**
- * Get password input from user (masked)
- */
-function getPasswordInput(prompt) {
-    return new Promise((resolve) => {
-        const readline = require('readline');
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        // Hide input
-        process.stdin.on('keypress', (char, key) => {
-            if (key && key.name === 'return') {
-                return;
-            }
-            if (key && key.name === 'backspace') {
-                process.stdout.write('\b \b');
-            } else if (char) {
-                process.stdout.write('*');
-            }
-        });
-
-        rl.question(prompt, (password) => {
-            rl.close();
-            console.log(''); // New line after password input
-            resolve(password);
-        });
-    });
-}
 
 /**
  * Handle first time password setup
@@ -382,33 +354,11 @@ async function handleFirstTimePasswordSetup() {
  * Prompt user to set password
  */
 async function promptForPasswordSetup() {
-    console.log('');
-    console.log(colors.cyan + 'Set Import/Export Password:' + colors.reset);
-
-    const password = await getPasswordInput('Password: ');
-    if (!password) {
-        console.log(colors.red + 'Password cannot be empty' + colors.reset);
+    const result = await setupNewPassword(apiManager, true);
+    if (result) {
         await waitForKey('Press any key to continue...');
-        return false;
     }
-
-    const confirmPassword = await getPasswordInput('Confirm Password: ');
-    if (password !== confirmPassword) {
-        console.log(colors.red + 'Passwords do not match, please try again' + colors.reset);
-        await waitForKey('Press any key to continue...');
-        return false;
-    }
-
-    try {
-        apiManager.setExportPassword(password);
-        console.log(colors.green + '✓ Password set successfully!' + colors.reset);
-        await waitForKey('Press any key to continue...');
-        return true;
-    } catch (error) {
-        console.log(colors.red + `Failed to set password: ${error.message}` + colors.reset);
-        await waitForKey('Press any key to continue...');
-        return false;
-    }
+    return result;
 }
 
 /**
@@ -614,21 +564,34 @@ async function exportConfiguration() {
     console.log(colors.bright + colors.orange + '💾 Export Configuration' + colors.reset);
     console.log('');
 
-    // Request password verification
-    const password = await getPasswordInput('Enter password to verify identity: ');
+    // Add export function description
+    console.log(colors.cyan + '📄 Export Function Description:' + colors.reset);
+    console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
+    console.log(colors.gray + '  • Exported data is in plaintext JSON format for easy migration' + colors.reset);
+    console.log(colors.gray + '  • Export includes all API configurations (keys are encrypted in storage)' + colors.reset);
+    console.log('');
+
+    // Verify password before export
+    const verified = await verifyExportPassword(apiManager, 'export');
+    if (!verified) {
+        console.log('');
+        await waitForKey('Press any key to return...');
+        return;
+    }
 
     try {
-        const exportData = apiManager.exportConfig(password);
+        // Export plaintext configuration data directly, no additional password needed
+        const exportData = apiManager.exportConfigAuthenticated();
 
         console.log(colors.green + '✓ Configuration exported successfully' + colors.reset);
         console.log('');
-        console.log(colors.yellow + '📋 Exported Configuration Data:' + colors.reset);
+        console.log(colors.yellow + '📋 Exported Configuration Data (Plaintext JSON):' + colors.reset);
         console.log(colors.gray + '━'.repeat(50) + colors.reset);
         console.log(exportData);
         console.log(colors.gray + '━'.repeat(50) + colors.reset);
         console.log('');
         console.log(colors.cyan + 'Please copy the above content and save to a file' + colors.reset);
-        console.log(colors.gray + 'Recommended to save as .json file format' + colors.reset);
+        console.log(colors.gray + 'Recommended to save as .json file format for easy import and migration' + colors.reset);
 
     } catch (error) {
         console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
@@ -647,12 +610,24 @@ async function importConfiguration() {
     console.log(colors.bright + colors.orange + '📥 Import Configuration' + colors.reset);
     console.log('');
 
-    // Request password verification
-    const password = await getPasswordInput('Enter password to verify identity: ');
+    // Add import function description
+    console.log(colors.cyan + '📄 Import Function Description:' + colors.reset);
+    console.log(colors.gray + '  • Password verification required to confirm your identity' + colors.reset);
+    console.log(colors.gray + '  • Import data should be in plaintext JSON format' + colors.reset);
+    console.log(colors.gray + '  • Import data will be merged with current configuration (no overwrite)' + colors.reset);
+    console.log(colors.gray + '  • Duplicate API configurations will be automatically skipped' + colors.reset);
+    console.log('');
+
+    // Verify password identity
+    const passwordVerified = await verifyExportPassword(apiManager, 'import');
+    if (!passwordVerified) {
+        await waitForKey('Press any key to return...');
+        return;
+    }
 
     console.log('');
-    console.log(colors.cyan + 'Please paste configuration JSON data:' + colors.reset);
-    console.log(colors.gray + '(Press Enter when done pasting)' + colors.reset);
+    console.log(colors.cyan + 'Please paste configuration data (plaintext JSON format):' + colors.reset);
+    console.log(colors.gray + '(Press Enter when finished pasting)' + colors.reset);
 
     const readline = require('readline');
     const rl = readline.createInterface({
@@ -673,13 +648,15 @@ async function importConfiguration() {
     });
 
     try {
-        const result = apiManager.importConfig(configData.trim(), password);
+        // Import plaintext configuration data directly, no password decryption needed
+        const result = apiManager.importConfigAuthenticated(configData.trim());
 
         console.log(colors.green + '✓ Configuration imported successfully' + colors.reset);
         console.log('');
         console.log(colors.cyan + `Import Statistics:` + colors.reset);
-        console.log(colors.gray + `• Successfully imported: ${result.imported} APIs` + colors.reset);
-        console.log(colors.gray + `• Skipped duplicates: ${result.skipped} APIs` + colors.reset);
+        console.log(colors.gray + `• Successfully imported: ${result.imported} API configurations` + colors.reset);
+        console.log(colors.gray + `• Skipped duplicates: ${result.skipped} API configurations` + colors.reset);
+        console.log(colors.gray + `• Configuration merged with existing data` + colors.reset);
 
     } catch (error) {
         console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
@@ -698,34 +675,11 @@ async function changePassword() {
     console.log(colors.bright + colors.orange + '🔑 Change Password' + colors.reset);
     console.log('');
 
-    // Verify current password
-    const currentPassword = await getPasswordInput('Enter current password: ');
-    if (!apiManager.verifyExportPassword(currentPassword)) {
-        console.log(colors.red + '❌ Current password is incorrect' + colors.reset);
-        await waitForKey('Press any key to return...');
-        return;
-    }
+    // Use unified password change module
+    const success = await changePasswordModule(apiManager);
 
-    // Set new password
-    const newPassword = await getPasswordInput('Enter new password: ');
-    if (!newPassword) {
-        console.log(colors.red + 'Password cannot be empty' + colors.reset);
-        await waitForKey('Press any key to return...');
-        return;
-    }
-
-    const confirmPassword = await getPasswordInput('Confirm new password: ');
-    if (newPassword !== confirmPassword) {
-        console.log(colors.red + 'Passwords do not match, please try again' + colors.reset);
-        await waitForKey('Press any key to return...');
-        return;
-    }
-
-    try {
-        apiManager.setExportPassword(newPassword);
-        console.log(colors.green + '✓ Password changed successfully!' + colors.reset);
-    } catch (error) {
-        console.log(colors.red + `Failed to change password: ${error.message}` + colors.reset);
+    if (success) {
+        console.log('');
     }
 
     await waitForKey('Press any key to return...');
