@@ -317,34 +317,23 @@ async function switchThirdPartyApi() {
         const activeApi = apiManager.getActiveApi();
         const activeIndex = activeApi ? apis.findIndex(api => api.id === activeApi.id) : -1;
 
+        // 现在表格函数内部处理整个切换流程
         const selectedApi = await showApiSelectionTable(
             apis,
             '[!] Select API to switch to:',
             'switch',
-            activeIndex
+            activeIndex,
+            apiManager  // 传递 apiManager 让表格函数处理切换逻辑
         );
 
-        if (!selectedApi) {
-            return showMenu();
-        }
-
-        // Find the index of the selected API
-        const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
-        const switchedApi = apiManager.setActiveApi(selectedIndex);
-
-        console.clear();
-        showSuccess(await i18n.t('messages.success.api_switched'), [
-            `${await i18n.t('api.actions.switch_success', switchedApi.name)}`,
-            `${await i18n.t('api.details.provider')}: ${switchedApi.provider}`,
-            `${await i18n.t('api.details.url')}: ${switchedApi.baseUrl}`,
-            `${await i18n.t('api.details.model')}: ${switchedApi.model}`
-        ]);
+        // 表格函数已经处理了所有显示和切换逻辑，直接返回主菜单
+        return showMenu();
 
     } catch (error) {
         showError(await i18n.t('errors.api.failed_switch', error.message));
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+        return showMenu();
     }
-
-    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 /**
