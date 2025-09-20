@@ -11,27 +11,12 @@
 function forceStdinCleanup() {
     try {
         if (process.stdin.isTTY) {
-            // Force raw mode off first
             process.stdin.setRawMode(false);
-
-            // Remove ALL event listeners
-            process.stdin.removeAllListeners();
-
-            // Pause stdin to reset state
+            process.stdin.removeAllListeners('data');
             process.stdin.pause();
-
-            // Resume and set to standard input mode
-            setTimeout(() => {
-                try {
-                    process.stdin.resume();
-                    process.stdin.setEncoding('utf8');
-                } catch (resumeError) {
-                    // Ignore resume errors
-                }
-            }, 50);
         }
     } catch (error) {
-        // Ignore all cleanup errors - continue execution
+        // Ignore cleanup errors
     }
 }
 
