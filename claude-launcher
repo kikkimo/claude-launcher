@@ -24,6 +24,7 @@ function forceStdinCleanup() {
 const ApiManager = require('./lib/api-manager');
 const Menu = require('./lib/ui/menu');
 const colors = require('./lib/ui/colors');
+const { checkForUpdates, forceCheckForUpdates } = require('./lib/utils/version-checker');
 const {
     waitForKey,
     promptForThirdPartyApi,
@@ -676,7 +677,10 @@ async function executeSelection(selectedIndex) {
         case 5: // Language Settings
             return await showLanguageSettings();
 
-        case 6: // Exit
+        case 6: // Version Update Check
+            return await showVersionUpdateCheck();
+
+        case 7: // Exit
             console.log('');
             console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
             process.exit(0);
@@ -698,6 +702,35 @@ async function showMenu() {
     // Ensure global menus are initialized
     initializeGlobalMenus();
 
+    // ========================================
+    // Version check configuration (hardcoded, modify as needed)
+    // ========================================
+    const ALWAYS_SHOW_VERSION = false;           // Version display toggle: true=always show, false=only show updates
+    const VERSION_CHECK_INTERVAL_HOURS = 12;    // Version check interval (hours): modify this to adjust check frequency
+
+    // Check for updates and prepare version info string
+    let versionInfo = null;
+    try {
+        const updateInfo = await checkForUpdates(false, VERSION_CHECK_INTERVAL_HOURS);
+
+        // Use hardcoded switch instead of config file settings
+        const shouldShowVersion = ALWAYS_SHOW_VERSION || updateInfo.available;
+
+        if (shouldShowVersion) {
+            if (updateInfo.available) {
+                // Display update notification (Claude Code style)
+                versionInfo = colors.yellow + '  ⚠️  ' + i18n.tSync('version.update_available', updateInfo.latestVersion, updateInfo.currentVersion) + colors.reset + '\n' +
+                             colors.yellow + '     ' + i18n.tSync('version.install_command') + colors.reset;
+            } else if (ALWAYS_SHOW_VERSION) {
+                // Display current version info (always show mode)
+                versionInfo = colors.cyan + '  ℹ️  ' + i18n.tSync('version.current_version_info', updateInfo.currentVersion, updateInfo.latestVersion) + colors.reset + '\n' +
+                             colors.yellow + '     ' + i18n.tSync('version.install_command') + colors.reset;
+            }
+        }
+    } catch (error) {
+        // Silently ignore update check errors
+    }
+
     // Populate menu options dynamically with i18n translations
     menuOptions = [
         await i18n.t('menu.main.launch_default'),
@@ -706,11 +739,12 @@ async function showMenu() {
         await i18n.t('menu.main.launch_api_skip'),
         await i18n.t('menu.main.api_management'),
         await i18n.t('menu.main.language_settings'),
+        await i18n.t('menu.main.version_check'),
         await i18n.t('menu.main.exit')
     ];
 
     globalMainMenu.setOptions(menuOptions);
-    const selection = await globalMainMenu.navigate();
+    const selection = await globalMainMenu.navigate(false, versionInfo); // Pass version info to display between banner and nav
 
     if (selection === -1) {
         console.log('');
@@ -998,6 +1032,76 @@ async function showLanguageSettings() {
     }
 }
 
+/**
+ * Show version update check screen
+ */
+async function showVersionUpdateCheck() {
+    try {
+        console.clear();
+        console.log('');
+        console.log(colors.bright + colors.orange + '🔄 ' + await i18n.t('version_check.title') + colors.reset);
+        console.log('');
+
+        console.log(colors.cyan + await i18n.t('version_check.checking') + colors.reset);
+        console.log(colors.gray + await i18n.t('version_check.please_wait') + colors.reset);
+        console.log('');
+
+        // Show progress indicator
+        const progressInterval = setInterval(() => {
+            process.stdout.write('.');
+        }, 500);
+
+        try {
+            // Force check with 15 second timeout
+            const result = await forceCheckForUpdates(15000);
+
+            // Stop progress indicator
+            clearInterval(progressInterval);
+            console.log('\n');
+
+            if (result.error) {
+                // Handle errors (timeout, network, etc.)
+                console.log(colors.red + '❌ ' + await i18n.t('version_check.error') + colors.reset);
+                console.log(colors.red + '   ' + result.error + colors.reset);
+                console.log('');
+                console.log(colors.gray + await i18n.t('version_check.error_tips') + colors.reset);
+            } else if (result.available) {
+                // Update available
+                console.log(colors.yellow + '🎉 ' + await i18n.t('version_check.update_available') + colors.reset);
+                console.log('');
+                console.log(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset);
+                console.log(colors.green + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset);
+                console.log('');
+                console.log(colors.yellow + '💡 ' + await i18n.t('version_check.update_command') + colors.reset);
+                console.log(colors.yellow + '   npm update -g @kikkimo/claude-launcher' + colors.reset);
+            } else {
+                // Already up to date
+                console.log(colors.green + '✅ ' + await i18n.t('version_check.up_to_date') + colors.reset);
+                console.log('');
+                console.log(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset);
+                console.log(colors.cyan + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset);
+            }
+
+        } catch (error) {
+            // Stop progress indicator
+            clearInterval(progressInterval);
+            console.log('\n');
+
+            console.log(colors.red + '❌ ' + await i18n.t('version_check.unexpected_error') + colors.reset);
+            console.log(colors.red + '   ' + error.message + colors.reset);
+        }
+
+        console.log('');
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+        return showMenu();
+
+    } catch (error) {
+        console.log(colors.red + '❌ Failed to check version: ' + error.message + colors.reset);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+        return showMenu();
+    }
+}
+
 // End of API Management functions
 
 /**
@@ -1011,11 +1115,6 @@ process.on('SIGTERM', () => {
 
 // Initialize global menus and start the application
 initializeGlobalMenus();
-
-// Show version
-console.log('');
-console.log(colors.dim + i18n.tSync('ui.general.launcher_version') + colors.reset);
-console.log('');
 
 // Start the application
 showMenu();
