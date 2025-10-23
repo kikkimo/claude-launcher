@@ -7,16 +7,26 @@
 
 /**
  * Force complete stdin reset to prevent navigation issues
+ * Note: This function should only reset state, not remove listeners
+ * that might be used by other modules
  */
 function forceStdinCleanup() {
     try {
         if (process.stdin.isTTY) {
+            // Only reset mode, don't remove listeners that might be in use
             process.stdin.setRawMode(false);
-            process.stdin.removeAllListeners('data');
-            process.stdin.pause();
+            // NOTE: Removed removeAllListeners to prevent conflicts
+            // Each module should manage its own listeners
+            // Only pause if not already paused
+            if (!process.stdin.isPaused || !process.stdin.isPaused()) {
+                process.stdin.pause();
+            }
         }
     } catch (error) {
-        // Ignore cleanup errors
+        // Ignore cleanup errors but log for debugging
+        if (process.env.DEBUG_STDIN) {
+            console.error('[DEBUG] forceStdinCleanup error:', error.message);
+        }
     }
 }
 
@@ -1111,6 +1121,25 @@ process.on('SIGTERM', () => {
     console.log('');
     console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
     process.exit(0);
+});
+
+// Global SIGINT handler (Ctrl+C) - acts as a fallback
+// This ensures Ctrl+C always works even if stdin is in an unexpected state
+process.on('SIGINT', () => {
+    try {
+        // Try to restore stdin to normal state before exit
+        if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+        }
+    } catch (error) {
+        // Ignore errors during cleanup
+    }
+
+    console.log('');
+    console.log(colors.yellow + '\n[!] Process interrupted by user (Ctrl+C)' + colors.reset);
+    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
+    process.exit(130); // Standard exit code for SIGINT
 });
 
 // Initialize global menus and start the application
