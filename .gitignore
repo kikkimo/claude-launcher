@@ -75,3 +75,5 @@ test/
 tests/
 *.test.js
 *.spec.js
+/.serena
+/.claude
