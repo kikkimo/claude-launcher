@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Flexible environment variable configuration per provider
   - Provider-specific optimization display with validation
   - Internationalized provider notes and recommendations
-- **Complete i18n Coverage**: Extended internationalization support to all 9 languages:
+- **Complete i18n Coverage**: Extended internationalization support to all supported languages (English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian, Portuguese, Japanese, Korean, Russian):
   - Provider optimization messages (timeout, traffic control, custom variables)
   - Provider-specific notes and recommendations
   - Consistent terminology across all supported languages
