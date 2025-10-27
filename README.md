@@ -15,7 +15,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Claude-style interface with authentic orange/amber color scheme
 - Arrow key navigation with smooth menu transitions
 - Interactive tables for API selection and management
-- Multi-language support (8 languages including English, Chinese, German, French, Japanese, Korean, Russian, Spanish)
+- Multi-language support (English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian, Portuguese, Japanese, Korean, Russian)
 
 ### 🔐 **Advanced Security**
 - AES-256-CBC encryption for all sensitive data
@@ -52,7 +52,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
    ```
 
 3. **First-time setup:** The launcher will guide you through:
-   - Language selection (8 languages available)
+   - Language selection (11 languages available)
    - Security setup (password configuration for import/export)
    - Third-party API configuration (if desired)
 
@@ -86,7 +86,7 @@ node claude-launcher
 3. **Launch Claude Code with Third-party API** - Use configured third-party API
 4. **Launch Claude Code with Third-party API (Skip Permissions)** - Combine third-party API with permission skipping
 5. **Third-party API Management** - Configure, switch, remove APIs, view statistics
-6. **Language Settings** - Switch between 8 supported languages
+6. **Language Settings** - Switch between 11 supported languages
 7. **Version Update Check** - Check for launcher updates
 8. **Exit** - Close the launcher
 
@@ -148,7 +148,7 @@ Claude Launcher 2.0 uses an advanced configuration system:
 
 ### First-time Setup Process
 
-1. **Language Selection**: Choose from 8 supported languages
+1. **Language Selection**: Choose from 11 supported languages
 2. **Security Setup**:
    - Set up password protection for import/export (recommended)
    - Or skip for basic usage (limited features)
