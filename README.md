@@ -23,7 +23,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Strong password requirements and validation
 
 ### 🚀 **Third-party API Management**
-- Full support for multiple third-party API providers
+- Full support for multiple third-party API providers (OpenAI, Anthropic, GLM/ZhiPu AI, and more)
 - Interactive API configuration with validation
 - API usage statistics and tracking
 - Secure configuration backup and restore
@@ -156,10 +156,11 @@ Claude Launcher 2.0 uses an advanced configuration system:
 
 Configure any third-party API provider through the interactive interface:
 
-- **Supported Providers**: OpenAI, Anthropic, Custom APIs, and more
+- **Supported Providers**: OpenAI, Anthropic, GLM (ZhiPu AI), and custom APIs
 - **Secure Storage**: All API tokens encrypted before storage
 - **Validation**: Real-time validation of URLs, tokens, and models
 - **Usage Tracking**: Monitor API usage statistics
+- **Provider-specific Features**: Optimized configuration for each provider with helpful notes and recommendations
 
 ### Configuration Import/Export
 
