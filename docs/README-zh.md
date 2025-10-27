@@ -1,5 +1,7 @@
 # Claude Launcher
 
+[![npm version](https://img.shields.io/npm/v/@kikkimo/claude-launcher.svg?style=flat-square)](https://www.npmjs.com/package/@kikkimo/claude-launcher) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT) [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/) [![npm downloads](https://img.shields.io/npm/dm/@kikkimo/claude-launcher.svg?style=flat-square)](https://www.npmjs.com/package/@kikkimo/claude-launcher) [![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kikkimo/claude-launcher)
+
 一个优雅的 Claude Code 交互式启动器，具有美观的 Claude 风格界面和全面的第三方 API 管理功能。通过直观的多语言命令行菜单使用各种配置启动 Claude Code。
 
 ## 📖 文档

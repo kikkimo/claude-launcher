@@ -1,5 +1,7 @@
 # Claude Launcher
 
+[![npm version](https://img.shields.io/npm/v/@kikkimo/claude-launcher.svg?style=flat-square)](https://www.npmjs.com/package/@kikkimo/claude-launcher) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT) [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg?style=flat-square)](https://nodejs.org/) [![npm downloads](https://img.shields.io/npm/dm/@kikkimo/claude-launcher.svg?style=flat-square)](https://www.npmjs.com/package/@kikkimo/claude-launcher) [![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kikkimo/claude-launcher)
+
 An elegant interactive launcher for Claude Code with a beautiful Claude-style interface and comprehensive third-party API management. Launch Claude Code with various configurations through an intuitive multilingual command-line menu.
 
 ## 📖 Documentation
