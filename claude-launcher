@@ -1128,11 +1128,22 @@ process.on('SIGTERM', () => {
 // This handler catches Ctrl+C in line mode (e.g., during readline input)
 const stdinManager = require('./lib/utils/stdin-manager');
 
+// Flag to prevent re-entrance of SIGINT handler
+let exiting = false;
+
 process.on('SIGINT', () => {
-    if (stdinManager.isSuspended && stdinManager.isSuspended()) {
-        // During Claude run, ignore in launcher so child handles it
+    // Prevent re-entrance - ensure cleanup runs only once
+    if (exiting) {
         return;
     }
+    exiting = true;
+
+    // During Claude run, ignore in launcher so child handles it
+    if (stdinManager.isSuspended && stdinManager.isSuspended()) {
+        exiting = false; // Reset flag since we're not actually exiting
+        return;
+    }
+
     // Try to reset stdin state before handling
     try {
         if (process.stdin.isTTY) {
@@ -1144,7 +1155,16 @@ process.on('SIGINT', () => {
     }
 
     // Use unified Ctrl+C handler from StdinManager (synchronous)
-    stdinManager.handleCtrlC();
+    try {
+        stdinManager.handleCtrlC();
+    } catch (_) {
+        // Ignore errors during Ctrl+C handling
+    }
+
+    // Exit with standard SIGINT exit code (128 + 2 = 130)
+    // Note: If handleCtrlC() calls process.exit(0) for second Ctrl+C,
+    // this line won't be reached, which is expected behavior
+    process.exit(130);
 });
 
 // Initialize global menus and start the application
