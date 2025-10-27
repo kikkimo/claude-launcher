@@ -1129,6 +1129,10 @@ process.on('SIGTERM', () => {
 const stdinManager = require('./lib/utils/stdin-manager');
 
 process.on('SIGINT', async () => {
+    if (stdinManager.isSuspended && stdinManager.isSuspended()) {
+        // During Claude run, ignore in launcher so child handles it
+        return;
+    }
     // Try to reset stdin state before handling
     try {
         if (process.stdin.isTTY) {
