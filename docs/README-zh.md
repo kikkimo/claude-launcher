@@ -25,7 +25,7 @@
 - 强密码要求和验证
 
 ### 🚀 **第三方 API 管理**
-- 全面支持多个第三方 API 提供商（OpenAI、Anthropic、GLM/智谱AI 等）
+- 全面支持多个第三方 API 提供商（OpenAI、Anthropic、DeepSeek、Kimi、GLM/智谱AI 和自定义 API）
 - 带验证的交互式 API 配置
 - API 使用统计和跟踪
 - 安全的配置备份和恢复
