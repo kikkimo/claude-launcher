@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-10-27
+
+### Added
+- **GLM (ZhiPu AI) Provider Support**: Full integration for ZhiPu AI's GLM models with two provider options:
+  - `zhipu`: For mainland China users (智谱清言)
+  - `zai`: For international users (Z.ai Global)
+  - Support for GLM-4.5 and GLM-4.6 models
+  - Extended timeout configuration (50 minutes) for large response handling
+  - Optimized network traffic settings for better performance
+- **Moonshot Provider Enhancements**: Added extended timeout configuration and traffic optimization for Moonshot AI provider
+- **Enhanced Ctrl+C Interaction**: Comprehensive Ctrl+C handling with four distinct scenarios:
+  - Basic trigger with warning message display
+  - Auto-cancel after 3-second timeout
+  - Double Ctrl+C for immediate exit confirmation
+  - Any other key press to cancel warning and continue operation
+- **StdinManager Centralized Control**: New singleton class for unified stdin state management:
+  - Scope-based stdin acquisition with automatic cleanup
+  - Detach/reattach mechanism for proper scope isolation
+  - Suspension API for child process coordination
+  - Comprehensive Ctrl+C state tracking and handling
+- **Provider-specific Configuration System**: Dynamic provider configuration framework:
+  - Flexible environment variable configuration per provider
+  - Provider-specific optimization display with validation
+  - Internationalized provider notes and recommendations
+- **Complete i18n Coverage**: Extended internationalization support to all 9 languages:
+  - Provider optimization messages (timeout, traffic control, custom variables)
+  - Provider-specific notes and recommendations
+  - Consistent terminology across all supported languages
+- **Automated Test Suites**: Comprehensive test coverage for stdin management:
+  - Interactive test scripts for manual validation
+  - Automated test scripts for CI/CD integration
+  - Test fixture files for isolated testing
+
+### Changed
+- **Provider Configuration Architecture**: Refactored from hardcoded switch statements to dynamic config lookup system
+- **Stdin Operations**: Migrated all stdin operations to use centralized StdinManager:
+  - Menu navigation
+  - Interactive tables
+  - Prompt inputs
+  - Confirmation dialogs
+  - Password input
+- **Console Control Handover**: Redesigned parent-child process coordination:
+  - Clean console relinquishment before launching Claude Code
+  - Suspension-aware SIGINT handling
+  - Proper console restoration after child process exit
+- **Error Handling**: Unified error handling with `handleLaunchFailure` function
+- **Ctrl+C Monitoring**: Disabled during Claude Code subprocess launch to prevent interception conflicts
+- **Test Configuration Files**: Renamed test-config.json to test-config.fixture for better semantic clarity
+
+### Fixed
+- **Stdin State Management**: Resolved critical hanging issues in CLI interaction:
+  - Fixed Promise deadlocks caused by cross-scope listener interference
+  - Eliminated dangerous `removeAllListeners` calls that destroyed active listeners
+  - Added proper timeout handling (60 seconds) for user input operations
+  - Fixed redundant isPaused check that incorrectly tested both property and method
+- **Listener Conflicts**: Prevented stdin listener conflicts between nested scopes:
+  - Implemented scope-aware listener management
+  - Added detach/reattach pattern for safe scope transitions
+  - Tracked active scope for accurate nested scope handling
+  - Fixed waitForKey listener removal bug causing Promise hangs on Ctrl+C
+- **Password Input**: Properly cleanup and reject Promise on Ctrl+C to prevent resource leaks
+- **Input Processing**: Fixed consecutive operation hangs (e.g., API switch followed by deletion)
+- **Ctrl+C Reliability**: Enhanced Ctrl+C responsiveness across all interfaces with proper state tracking
+- **Terminal State Cleanup**: Improved stdin cleanup before and after Claude Code launch
+- **Character Encoding**: Replaced mojibake characters (����, ��) with proper Unicode glyphs (↑↓, →) in menu
+- **ANSI Escape Sequences**: Added TTY checks to prevent ANSI codes from polluting non-TTY output (logs, CI/CD)
+- **Global Signal Handlers**: Removed dangerous `removeAllListeners('SIGINT/SIGTERM')` calls that could break other modules
+- **Timeout Display**: Added validation for API_TIMEOUT_MS parsing to prevent NaN display in provider optimizations
+- **Test File Tracking**: Removed incorrect .gitignore rules that prevented test files from being tracked
+- **Code Quality**: Removed unused variables and dead code from test files
+
+### Security
+- **Enhanced Secret Masking**: Expanded environment variable masking to detect and hide:
+  - API tokens, keys, secrets
+  - Passwords, credentials, authentication tokens
+  - Case-insensitive pattern matching for reliable detection
+  - Applied masking to both base and custom provider environment variables
+- **Consistent Security Protection**: Unified secret masking across all environment variable displays
+
+### Refactored
+- **Provider Environment Variables**: Moved from inline switch statements to provider configuration objects
+- **Stdin Management**: Complete migration to centralized StdinManager pattern across all modules
+- **Launch Logic**: Restructured Claude Code launching with clear control handover phases
+- **State Restoration**: Eliminated duplicate state restoration in StdinScope.release() for cleaner control flow
+- **Test Organization**: Improved test file naming conventions and structure
+
+### Documentation
+- **README Updates**: Documented GLM API support in both English and Chinese versions
+- **Provider Documentation**: Added comprehensive provider-specific feature descriptions
+- **Configuration Guide**: Enhanced API configuration documentation with provider-specific details
+
 ## [2.0.0] - 2025-09-21
 
 ### Added
