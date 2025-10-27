@@ -1132,17 +1132,17 @@ const stdinManager = require('./lib/utils/stdin-manager');
 let exiting = false;
 
 process.on('SIGINT', () => {
+    // During Claude run, ignore in launcher so child handles it
+    // Check this BEFORE setting exiting flag to avoid breaking reentrancy protection
+    if (stdinManager.isSuspended && stdinManager.isSuspended()) {
+        return;
+    }
+
     // Prevent re-entrance - ensure cleanup runs only once
     if (exiting) {
         return;
     }
     exiting = true;
-
-    // During Claude run, ignore in launcher so child handles it
-    if (stdinManager.isSuspended && stdinManager.isSuspended()) {
-        exiting = false; // Reset flag since we're not actually exiting
-        return;
-    }
 
     // Try to reset stdin state before handling
     try {
