@@ -1128,7 +1128,7 @@ process.on('SIGTERM', () => {
 // This handler catches Ctrl+C in line mode (e.g., during readline input)
 const stdinManager = require('./lib/utils/stdin-manager');
 
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
     if (stdinManager.isSuspended && stdinManager.isSuspended()) {
         // During Claude run, ignore in launcher so child handles it
         return;
@@ -1143,7 +1143,7 @@ process.on('SIGINT', async () => {
         // Ignore errors during emergency cleanup
     }
 
-    // Use unified Ctrl+C handler from StdinManager
+    // Use unified Ctrl+C handler from StdinManager (synchronous)
     stdinManager.handleCtrlC();
 });
 
