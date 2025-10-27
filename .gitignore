@@ -70,10 +70,8 @@ Thumbs.db
 # Keep template file
 !claude-launcher-template.env
 
-# Test files
+# Test files (allow our stdin fix tests)
 test/
-tests/
-*.test.js
 *.spec.js
 /.serena
 /.claude
