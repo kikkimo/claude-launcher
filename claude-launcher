@@ -17,8 +17,8 @@ function forceStdinCleanup() {
             process.stdin.setRawMode(false);
             // NOTE: Removed removeAllListeners to prevent conflicts
             // Each module should manage its own listeners
-            // Only pause if not already paused
-            if (!process.stdin.isPaused || !process.stdin.isPaused()) {
+            // Only pause if not already paused (isPaused is a method, not a property)
+            if (!process.stdin.isPaused()) {
                 process.stdin.pause();
             }
         }
