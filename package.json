@@ -1,6 +1,6 @@
 {
   "name": "@kikkimo/claude-launcher",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Interactive launcher for Claude Code with beautiful Claude-style interface",
   "main": "claude-launcher",
   "bin": {
