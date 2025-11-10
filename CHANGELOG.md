@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-11-10
+
+### Added
+- **Kimi for Coding Provider**: New specialized provider for coding-focused AI assistance:
+  - `kimi_for_coding`: Dedicated endpoint optimized for software development workflows
+  - Specialized coding model: `kimi-for-coding` with enhanced code generation capabilities
+  - Extended timeout configuration (50 minutes) for large code generation and complex development tasks
+  - Anthropic-compatible API interface for seamless integration with existing tooling
+  - Consistent configuration patterns mirroring moonshot provider settings
+- **Enhanced Kimi Thinking Models**: Expanded support for Kimi's thinking-capable models:
+  - `kimi-k2-thinking`: Standard thinking model for complex reasoning tasks
+  - `kimi-k2-thinking-turbo`: Optimized thinking model for faster response times
+  - Additional model options for users requiring different performance characteristics
+
+### Changed
+- **Provider Selection Interface**: Updated UI prompts to include new `kimi_for_coding` provider in third-party API selection menu
+- **Provider Configuration**: Extended provider validation logic to properly handle new specialized coding provider
+
+### Fixed
+- **Provider Recognition**: Fixed provider ID validation to include `kimi_for_coding` in the list of supported providers for third-party API configuration
+
 ## [2.1.0] - 2025-10-27
 
 ### Added
