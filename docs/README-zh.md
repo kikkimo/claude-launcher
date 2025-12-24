@@ -25,7 +25,7 @@
 - 强密码要求和验证
 
 ### 🚀 **第三方 API 管理**
-- 全面支持多个第三方 API 提供商（OpenAI、Anthropic、DeepSeek、Kimi、GLM/智谱AI 和自定义 API）
+- 全面支持多个第三方 API 提供商（OpenAI、Anthropic、DeepSeek、Kimi、MiniMax、GLM/智谱AI 和自定义 API）
 - 带验证的交互式 API 配置
 - API 使用统计和跟踪
 - 安全的配置备份和恢复
@@ -158,7 +158,7 @@ Claude Launcher 2.0 使用先进的配置系统：
 
 通过交互界面配置任何第三方 API 提供商：
 
-- **支持的提供商**：OpenAI、Anthropic、DeepSeek、Kimi、GLM/智谱AI 和自定义 API
+- **支持的提供商**：OpenAI、Anthropic、DeepSeek、Kimi、MiniMax（国内版/国际版）、GLM/智谱AI 和自定义 API
 - **安全存储**：所有 API 令牌在存储前加密
 - **验证**：URL、令牌和模型的实时验证
 - **使用跟踪**：监控 API 使用统计

@@ -25,7 +25,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Strong password requirements and validation
 
 ### 🚀 **Third-party API Management**
-- Full support for multiple third-party API providers (OpenAI, Anthropic, DeepSeek, Kimi, GLM (ZhiPu AI), and more)
+- Full support for multiple third-party API providers (OpenAI, Anthropic, DeepSeek, Kimi, MiniMax, GLM (ZhiPu AI), and more)
 - Interactive API configuration with validation
 - API usage statistics and tracking
 - Secure configuration backup and restore
@@ -158,7 +158,7 @@ Claude Launcher 2.0 uses an advanced configuration system:
 
 Configure any third-party API provider through the interactive interface:
 
-- **Supported Providers**: OpenAI, Anthropic, DeepSeek, Kimi, GLM (ZhiPu AI), and custom APIs
+- **Supported Providers**: OpenAI, Anthropic, DeepSeek, Kimi, MiniMax (CN/Global), GLM (ZhiPu AI), and custom APIs
 - **Secure Storage**: All API tokens encrypted before storage
 - **Validation**: Real-time validation of URLs, tokens, and models
 - **Usage Tracking**: Monitor API usage statistics
