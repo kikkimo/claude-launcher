@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-12-24
+
+### Added
+- **MiniMax Provider Support**: Full integration for MiniMax AI with two provider options:
+  - `minimax_cn`: For China users (国内版) with endpoint at `api.minimaxi.com`
+  - `minimax_global`: For international users (国际版) with endpoint at `api.minimax.io`
+  - Support for `MiniMax-M2.1` model
+  - Extended timeout configuration (50 minutes) for large response handling
+  - Optimized network traffic settings for better performance
+- **Enhanced Anthropic Models**: Added latest Claude models:
+  - `claude-sonnet-4.5`: Enhanced Sonnet model with improved capabilities
+  - `claude-opus-4.5`: Enhanced Opus model with improved capabilities
+- **DeepSeek Reasoner Model**: Added `deepseek-reasoner` model for complex reasoning tasks
+- **ZhiPu AI GLM-4.7**: Added `glm-4.7` model support for both:
+  - `zhipu` provider (智谱清言 - mainland China)
+  - `zai` provider (Z.ai Global - international users)
+
+### Changed
+- **Provider Names**: Updated ZhiPu AI provider names to reflect GLM-4.7 support:
+  - `zhipu`: Now shows "GLM-4.5/4.6/4.7" in display name
+  - `zai`: Now shows "GLM-4.5/4.6/4.7" in display name
+- **Documentation**: Updated README files to include MiniMax providers
+
+### Fixed
+- **Provider Selection**: Added MiniMax providers to third-party API selection menu
+
 ## [2.2.0] - 2025-11-10
 
 ### Added
