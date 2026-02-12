@@ -707,10 +707,9 @@ async function showModelUpgradeSettings() {
     console.log('');
 
     const menuOptions = [
-        await i18n.t('model_upgrade.menu_toggle_auto',
-            isAutoOn ? await i18n.t('model_upgrade.auto_upgrade_on') : await i18n.t('model_upgrade.auto_upgrade_off'),
-            isAutoOn ? await i18n.t('model_upgrade.auto_upgrade_off') : await i18n.t('model_upgrade.auto_upgrade_on')
-        ),
+        isAutoOn
+            ? await i18n.t('model_upgrade.menu_toggle_auto_on')
+            : await i18n.t('model_upgrade.menu_toggle_auto_off'),
         await i18n.t('model_upgrade.menu_manual_upgrade'),
         await i18n.t('model_upgrade.menu_back')
     ];
