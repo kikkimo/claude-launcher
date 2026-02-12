@@ -568,20 +568,23 @@ async function showApiManagementMenu() {
 
     // Build menu options based on password setup status
     const menuOptions = [
-        await i18n.t('menu.api_management.add_new'),
-        await i18n.t('menu.api_management.remove'),
-        await i18n.t('menu.api_management.switch'),
-        await i18n.t('menu.api_management.statistics')
+        await i18n.t('menu.api_management.add_new'),      // 0
+        await i18n.t('menu.api_management.remove'),       // 1
+        await i18n.t('menu.api_management.switch'),       // 2
+        await i18n.t('menu.api_management.statistics')    // 3
     ];
 
     // Add import/export options only if password is set
     if (apiManager.canUseImportExport()) {
-        menuOptions.push(await i18n.t('menu.api_management.export'));
-        menuOptions.push(await i18n.t('menu.api_management.import'));
-        menuOptions.push(await i18n.t('menu.api_management.change_password'));
+        menuOptions.push(await i18n.t('menu.api_management.export'));          // 4
+        menuOptions.push(await i18n.t('menu.api_management.import'));          // 5
+        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 6
     }
 
-    menuOptions.push(await i18n.t('menu.api_management.back'));
+    // Add model upgrade settings (always available)
+    menuOptions.push(await i18n.t('model_upgrade.settings_title'));  // 4 or 7 (depending on import/export)
+
+    menuOptions.push(await i18n.t('menu.api_management.back'));      // 5 or 8
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
@@ -604,7 +607,7 @@ async function showApiManagementMenu() {
         await viewStatistics();
         return showMenu();
     } else if (apiManager.canUseImportExport()) {
-        // If import/export is available, handle those options
+        // With import/export enabled: indices 4-8
         if (choice === 4) { // Export Configuration
             await exportConfiguration();
             return showMenu();
@@ -614,18 +617,161 @@ async function showApiManagementMenu() {
         } else if (choice === 6) { // Change Password
             await changePassword();
             return showMenu();
-        } else if (choice === 7) { // Back to Main Menu
+        } else if (choice === 7) { // Model Upgrade Settings (NEW)
+            return await showModelUpgradeSettings();
+        } else if (choice === 8) { // Back to Main Menu
             return showMenu();
         }
     } else {
-        // If import/export is not available, only Back to Main Menu
-        if (choice === 4) { // Back to Main Menu
+        // Without import/export: indices 4-5
+        if (choice === 4) { // Model Upgrade Settings (NEW)
+            return await showModelUpgradeSettings();
+        } else if (choice === 5) { // Back to Main Menu
             return showMenu();
         }
     }
 
     // Default fallback to main menu
     return showMenu();
+}
+
+/**
+ * Show model upgrade settings menu
+ */
+async function showModelUpgradeSettings() {
+    const versionChecker = require('./lib/utils/version-checker');
+    const upgradeChecker = require('./lib/utils/model-upgrade-checker');
+
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '⚙️  ' + await i18n.t('model_upgrade.settings_title') + colors.reset);
+    console.log('');
+
+    const config = await versionChecker.loadConfig();
+    const isAutoOn = config.autoModelUpgrade === true;
+
+    console.log(colors.cyan + '  ' + await i18n.t('model_upgrade.current_config') + ':' + colors.reset);
+    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
+        (isAutoOn
+            ? colors.green + await i18n.t('model_upgrade.auto_upgrade_on')
+            : colors.dim + await i18n.t('model_upgrade.auto_upgrade_off')
+        ) + colors.reset);
+    console.log('');
+
+    const menuOptions = [
+        await i18n.t('model_upgrade.menu_toggle_auto',
+            isAutoOn ? await i18n.t('model_upgrade.auto_upgrade_on') : await i18n.t('model_upgrade.auto_upgrade_off'),
+            isAutoOn ? await i18n.t('model_upgrade.auto_upgrade_off') : await i18n.t('model_upgrade.auto_upgrade_on')
+        ),
+        await i18n.t('model_upgrade.menu_manual_upgrade'),
+        await i18n.t('model_upgrade.menu_back')
+    ];
+
+    initializeGlobalMenus();
+    globalApiManagementMenu.setOptions(menuOptions);
+    const choice = await globalApiManagementMenu.navigate();
+
+    switch (choice) {
+        case 0: // Toggle auto upgrade
+            await versionChecker.setAutoModelUpgrade(!isAutoOn);
+            console.log('');
+            console.log(colors.green + '✓ ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
+                (!isAutoOn
+                    ? await i18n.t('model_upgrade.auto_upgrade_on')
+                    : await i18n.t('model_upgrade.auto_upgrade_off')
+                ) + colors.reset);
+            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+            return showModelUpgradeSettings();
+
+        case 1: // Manual upgrade
+            await performManualUpgrade();
+            return showModelUpgradeSettings();
+
+        case 2: // Back
+        case -1:
+        default:
+            return showApiManagementMenu();
+    }
+}
+
+/**
+ * Perform manual upgrade for all APIs with interactive confirmation
+ */
+async function performManualUpgrade() {
+    const { getLatestModel, getProvider } = require('./lib/presets/providers');
+    const { simpleInput } = require('./lib/ui/prompts');
+
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '🔄 ' + await i18n.t('model_upgrade.manual_title') + colors.reset);
+    console.log('');
+
+    const apis = apiManager.getApis();
+
+    if (apis.length === 0) {
+        console.log(colors.yellow + '  ' + await i18n.t('messages.info.no_apis') + colors.reset);
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+        return;
+    }
+
+    console.log(colors.gray + '  ' + await i18n.t('model_upgrade.manual_checking', apis.length) + colors.reset);
+    console.log('');
+
+    let upgradedCount = 0;
+    let skippedUpToDate = 0;
+    let skippedNoInfo = 0;
+    let skippedByUser = 0;
+
+    for (let i = 0; i < apis.length; i++) {
+        const api = apis[i];
+        const latestModel = getLatestModel(api.model, api.provider);
+
+        console.log(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset);
+        console.log(colors.bright + `  ${i + 1}/${apis.length}  ${api.name}` + colors.reset);
+        console.log(colors.gray + '       ' + await i18n.t('model_upgrade.manual_api_current', api.model) + colors.reset);
+
+        if (latestModel) {
+            console.log(colors.green + '       ' + await i18n.t('model_upgrade.manual_api_latest', latestModel) + colors.reset);
+            console.log('');
+
+            // Ask for confirmation
+            const answer = await simpleInput(colors.yellow + '       ' + await i18n.t('model_upgrade.manual_confirm') + ' ' + colors.reset);
+
+            if (answer.toLowerCase() !== 'n') {
+                apiManager.updateApiModel(api.id, latestModel);
+                console.log(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset);
+                upgradedCount++;
+            } else {
+                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_skipped') + colors.reset);
+                skippedByUser++;
+            }
+        } else {
+            // No upgrade info available - check if model exists in provider
+            const provider = getProvider(api.provider);
+            if (provider && provider.models && provider.models.includes(api.model)) {
+                // Model exists in provider, likely already latest or no alias defined
+                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_uptodate') + colors.reset);
+                skippedUpToDate++;
+            } else {
+                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_no_info') + colors.reset);
+                skippedNoInfo++;
+            }
+        }
+
+        console.log('');
+    }
+
+    console.log(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset);
+    console.log('');
+    console.log(colors.green + '  ' + await i18n.t('model_upgrade.manual_complete') + colors.reset);
+    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_upgraded', upgradedCount) + colors.reset);
+    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_skipped',
+        skippedUpToDate + skippedNoInfo + skippedByUser,
+        skippedUpToDate,
+        skippedNoInfo) + colors.reset);
+    console.log('');
+
+    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 /**
