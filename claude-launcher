@@ -357,44 +357,92 @@ async function switchThirdPartyApi() {
 /**
  * View API statistics
  */
+/**
+ * Format timestamp to relative time
+ * @param {string|null} timestamp - ISO timestamp or null
+ * @returns {string} Relative time string
+ */
+function formatRelativeTime(timestamp) {
+    if (!timestamp) return i18n.tSync('statistics.time_never');
+
+    const now = Date.now();
+    const diff = now - new Date(timestamp).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return i18n.tSync('statistics.time_just_now');
+    if (minutes < 60) return i18n.tSync('statistics.time_minutes_ago', minutes);
+    if (hours < 24) return i18n.tSync('statistics.time_hours_ago', hours);
+    return i18n.tSync('statistics.time_days_ago', days);
+}
+
 async function viewStatistics() {
+    const { padStringToWidth } = require('./lib/utils/string-width');
+
     console.clear();
     console.log('');
     console.log(colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset);
     console.log('');
 
-    const stats = apiManager.getStatistics();
-    const apis = apiManager.getApis();
+    const stats = apiManager.getEnhancedStatistics();
 
-    console.log(colors.cyan + '  ' + i18n.tSync('ui.general.summary') + colors.reset);
+    // Summary section
+    console.log(colors.cyan + '  ' + i18n.tSync('ui.general.summary') + ':' + colors.reset);
     console.log(colors.gray + `    ${await i18n.t('statistics.total_apis', stats.totalApis)}` + colors.reset);
     console.log(colors.gray + `    ${await i18n.t('statistics.active_api', stats.activeApiName)}` + colors.reset);
     console.log(colors.gray + `    ${await i18n.t('statistics.most_used', stats.mostUsedApi)}` + colors.reset);
     console.log(colors.gray + `    ${await i18n.t('statistics.total_usage', stats.totalUsage)}` + colors.reset);
+    console.log(colors.gray + `    ${await i18n.t('statistics.success_rate', stats.successRate)}` + colors.reset);
     console.log('');
 
-    if (apis.length > 0) {
-        console.log(colors.cyan + '  ' + i18n.tSync('ui.general.configured_apis') + colors.reset);
+    if (stats.apiStats.length > 0) {
+        console.log(colors.cyan + '  ' + i18n.tSync('ui.general.configured_apis') + ':' + colors.reset);
+        console.log('');
 
-        // Pre-fetch translations to avoid await in forEach
-        const currentlyActiveText = await i18n.t('api.details.currently_active');
-        const providerText = await i18n.t('api.details.provider');
-        const usageText = await i18n.t('api.details.usage');
-        const timesSuffixText = await i18n.t('api.details.times_suffix');
-        const createdAtText = await i18n.t('api.details.created_at');
+        // Table header
+        console.log(colors.dim + '    ' +
+            padStringToWidth(await i18n.t('statistics.header_name'), 20) +
+            padStringToWidth(await i18n.t('statistics.header_usage'), 10) +
+            padStringToWidth(await i18n.t('statistics.header_success'), 10) +
+            await i18n.t('statistics.header_last_used') +
+            colors.reset);
+        console.log(colors.dim + '    ' + '─'.repeat(60) + colors.reset);
 
-        apis.forEach((api, index) => {
-            const isActive = apiManager.getActiveApi()?.id === api.id;
-            const activeText = isActive ? ` (${currentlyActiveText})` : '';
-            console.log(colors.gray + `    ${index + 1}. ${api.name}${activeText}` + colors.reset);
-            console.log(colors.dim + `       ${providerText}: ${api.provider}` + colors.reset);
-            console.log(colors.dim + `       ${usageText}: ${api.usageCount || 0} ${timesSuffixText}` + colors.reset);
-            console.log(colors.dim + `       ${createdAtText}: ${api.createdAt}` + colors.reset);
-        });
+        for (const api of stats.apiStats) {
+            const lastUsedText = formatRelativeTime(api.lastUsed);
+            console.log(colors.gray + '    ' +
+                padStringToWidth(api.name, 20) +
+                padStringToWidth(String(api.usageCount), 10) +
+                padStringToWidth(api.successRate, 10) +
+                lastUsedText +
+                colors.reset);
+        }
     }
 
     console.log('');
-    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+
+    // Use menu for actions instead of special key handling
+    const menuOptions = [
+        await i18n.t('statistics.menu_reset'),
+        await i18n.t('statistics.menu_back')
+    ];
+
+    initializeGlobalMenus();
+    globalApiManagementMenu.setOptions(menuOptions);
+    const choice = await globalApiManagementMenu.navigate();
+
+    if (choice === 0) { // Reset Statistics
+        const { simpleInput } = require('./lib/ui/prompts');
+        const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
+        if (confirm.toLowerCase() === 'y') {
+            apiManager.resetStatistics();
+            console.log(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset);
+            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+        }
+        return viewStatistics();
+    }
+    // choice === 1 or -1: Back - just return
 }
 
 
@@ -792,12 +840,15 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
             return showMenu();
         }
 
-        // Increment usage count for the active API since we're actually using it
-        apiManager.incrementActiveApiUsage();
+        // Record successful launch BEFORE launching (since process exits after)
+        apiManager.recordSuccessfulLaunch();
 
         launchClaudeWithApi(activeApi, skipPermissions);
 
     } catch (error) {
+        // Record failed launch
+        apiManager.recordFailedLaunch(error.message);
+
         showError('Failed to launch with third-party API', [error.message]);
 
         setTimeout(() => {
