@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-02-12
+
+### Added
+- **GLM-5 Model Support**: Added GLM-5 model for ZhiPu AI providers (`zhipu` and `zai`)
+- **Claude Opus 4.6 Model**: Added `claude-opus-4-6` model support with unified hyphen naming format
+- **Model Upgrade Notification**: Automatic startup notification when newer model versions are available for configured APIs
+- **Model Upgrade Settings Menu**: New submenu under API Management with:
+  - Auto Upgrade toggle (ON/OFF) - automatically use latest model versions
+  - Manual Upgrade option - review and confirm each model upgrade individually
+- **Enhanced Usage Statistics**: Added success/failure rate tracking for API calls:
+  - Overall success rate display
+  - Per-API success rate in statistics table
+  - Time-based last used display (just now, minutes ago, hours ago, days ago)
+- **Statistics Submenu**: Restructured statistics page with submenu:
+  - View Statistics Details
+  - Reset Statistics
+- **Clear All APIs**: New bulk delete option in Remove API submenu:
+  - Delete Single API
+  - Clear All APIs (with CLEAR confirmation prompt)
+
+### Changed
+- **Model Naming Convention**: Unified all model names to use hyphen format (e.g., `claude-opus-4-6` instead of mixed formats)
+- **Auto Upgrade Toggle**: Changed to radio button style for better visual feedback
+- **Statistics Display**: Enhanced table format with success rate column and relative time display
+- **Menu Structure**: Reorganized API management with logical submenu groupings
+
+### Fixed
+- **Auto Upgrade Execution**: Fixed auto upgrade to bypass cache and execute immediately when enabled
+- **Model Upgrade Notification**: Corrected menu name reference in upgrade notification hint
+- **i18n Synchronization**: Synced all 41 missing translation entries across 9 non-English locale files:
+  - Added `statistics` enhanced fields (15 entries) to all locales
+  - Added complete `model_upgrade` module (25 entries) to all locales
+  - Added missing `confirm_password_prompt` to affected locales
+
+### Documentation
+- **README Updates**: Updated both English and Chinese README files with:
+  - Model upgrade feature documentation
+  - Updated API management menu structure
+  - Success/failure rate tracking description
+  - Updated supported providers list
+
 ## [2.3.0] - 2025-12-24
 
 ### Added
