@@ -882,7 +882,7 @@ async function performManualUpgrade() {
             // Ask for confirmation
             const answer = await simpleInput(colors.yellow + '       ' + await i18n.t('model_upgrade.manual_confirm') + ' ' + colors.reset);
 
-            if (answer.toLowerCase() !== 'n') {
+            if (answer.toLowerCase() === 'y') {
                 apiManager.updateApiModel(api.id, latestModel);
                 console.log(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset);
                 upgradedCount++;
