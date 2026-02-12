@@ -741,6 +741,59 @@ async function showMenu() {
         // Silently ignore update check errors
     }
 
+    // ========================================
+    // Model upgrade check (new feature)
+    // ========================================
+    let modelUpgradeInfo = null;
+    try {
+        const upgradeChecker = require('./lib/utils/model-upgrade-checker');
+        const result = await upgradeChecker.checkForModelUpgrades(apiManager);
+
+        if (result.needsCheck && result.upgrades.length > 0) {
+            // Check if auto upgrade is enabled
+            const autoUpgrade = await upgradeChecker.isAutoUpgradeEnabled();
+
+            if (autoUpgrade) {
+                // Perform auto upgrade
+                const upgraded = upgradeChecker.performAutoUpgrade(apiManager, result.upgrades);
+                if (upgraded.length > 0) {
+                    modelUpgradeInfo = colors.green + '  ✓ ' +
+                        i18n.tSync('model_upgrade.auto_upgraded', upgraded[0].from, upgraded[0].to) + colors.reset;
+                    if (upgraded.length > 1) {
+                        modelUpgradeInfo += '\n' + colors.green + '    ' +
+                            `(+${upgraded.length - 1} more)` + colors.reset;
+                    }
+                }
+            } else {
+                // Show notification
+                const first = result.upgrades[0];
+                modelUpgradeInfo = colors.yellow + '  ⚠️  ' +
+                    i18n.tSync('model_upgrade.notification', first.currentModel, first.latestModel) +
+                    colors.reset + '\n' +
+                    colors.yellow + '      ' +
+                    i18n.tSync('model_upgrade.notification_api', first.apiName) +
+                    colors.reset + '\n' +
+                    colors.gray + '      ' +
+                    i18n.tSync('model_upgrade.notification_hint') +
+                    colors.reset;
+            }
+        }
+    } catch (error) {
+        // Silently ignore model upgrade check errors
+    }
+
+    // Combine version info and model upgrade info
+    let displayInfo = '';
+    if (versionInfo) {
+        displayInfo += versionInfo;
+    }
+    if (modelUpgradeInfo) {
+        if (displayInfo) {
+            displayInfo += '\n';
+        }
+        displayInfo += modelUpgradeInfo;
+    }
+
     // Populate menu options dynamically with i18n translations
     menuOptions = [
         await i18n.t('menu.main.launch_default'),
@@ -754,7 +807,7 @@ async function showMenu() {
     ];
 
     globalMainMenu.setOptions(menuOptions);
-    const selection = await globalMainMenu.navigate(false, versionInfo); // Pass version info to display between banner and nav
+    const selection = await globalMainMenu.navigate(false, displayInfo || null); // Pass combined info to display between banner and nav
 
     if (selection === -1) {
         console.log('');
