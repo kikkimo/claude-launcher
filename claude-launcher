@@ -378,6 +378,47 @@ function formatRelativeTime(timestamp) {
 }
 
 async function viewStatistics() {
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset);
+    console.log('');
+
+    const menuOptions = [
+        await i18n.t('statistics.menu_view'),
+        await i18n.t('statistics.menu_reset'),
+        await i18n.t('statistics.menu_back')
+    ];
+
+    initializeGlobalMenus();
+    globalApiManagementMenu.setOptions(menuOptions);
+    const choice = await globalApiManagementMenu.navigate();
+
+    switch (choice) {
+        case 0: // View Statistics Details
+            await showStatisticsDetails();
+            return viewStatistics();
+
+        case 1: // Reset Statistics
+            const { simpleInput } = require('./lib/ui/prompts');
+            const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
+            if (confirm.toLowerCase() === 'y') {
+                apiManager.resetStatistics();
+                console.log(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset);
+                await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+            }
+            return viewStatistics();
+
+        case 2: // Back
+        case -1:
+        default:
+            return;
+    }
+}
+
+/**
+ * Show detailed statistics
+ */
+async function showStatisticsDetails() {
     const { padStringToWidth } = require('./lib/utils/string-width');
 
     console.clear();
@@ -418,31 +459,12 @@ async function viewStatistics() {
                 lastUsedText +
                 colors.reset);
         }
+    } else {
+        console.log(colors.gray + '  ' + await i18n.t('statistics.no_usage') + colors.reset);
     }
 
     console.log('');
-
-    // Use menu for actions instead of special key handling
-    const menuOptions = [
-        await i18n.t('statistics.menu_reset'),
-        await i18n.t('statistics.menu_back')
-    ];
-
-    initializeGlobalMenus();
-    globalApiManagementMenu.setOptions(menuOptions);
-    const choice = await globalApiManagementMenu.navigate();
-
-    if (choice === 0) { // Reset Statistics
-        const { simpleInput } = require('./lib/ui/prompts');
-        const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
-        if (confirm.toLowerCase() === 'y') {
-            apiManager.resetStatistics();
-            console.log(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset);
-            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-        }
-        return viewStatistics();
-    }
-    // choice === 1 or -1: Back - just return
+    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
 
