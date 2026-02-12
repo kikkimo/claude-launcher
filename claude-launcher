@@ -263,9 +263,52 @@ async function addNewThirdPartyApi() {
 }
 
 /**
- * Remove third-party API
+ * Remove third-party API menu with submenu
  */
 async function removeThirdPartyApi() {
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '🗑️  ' + await i18n.t('menu.remove_api.title') + colors.reset);
+    console.log('');
+
+    const apis = apiManager.getApis();
+
+    // Show current API count
+    if (apis.length > 0) {
+        console.log(colors.cyan + '  ' + await i18n.t('messages.info.current_api_count', apis.length) + colors.reset);
+        console.log('');
+    }
+
+    const menuOptions = [
+        await i18n.t('menu.remove_api.delete_single'),
+        await i18n.t('menu.remove_api.clear_all'),
+        await i18n.t('menu.remove_api.back')
+    ];
+
+    initializeGlobalMenus();
+    globalApiManagementMenu.setOptions(menuOptions);
+    const choice = await globalApiManagementMenu.navigate();
+
+    switch (choice) {
+        case 0: // Delete Single API
+            await deleteSingleApi();
+            return;
+
+        case 1: // Clear All APIs
+            await clearAllApis();
+            return;
+
+        case 2: // Back
+        case -1:
+        default:
+            return;
+    }
+}
+
+/**
+ * Delete a single API
+ */
+async function deleteSingleApi() {
     try {
         // Get API list
         const apis = apiManager.getApis();
@@ -281,7 +324,7 @@ async function removeThirdPartyApi() {
         );
 
         if (!selectedApi) {
-            return showMenu();
+            return;
         }
 
         // Show confirmation dialog
@@ -299,29 +342,62 @@ async function removeThirdPartyApi() {
                     `${await i18n.t('api.details.provider')}: ${selectedApi.provider}`
                 ]);
 
-                // Show success message and return to main menu
+                // Show success message
                 const remainingApis = apiManager.getApis();
                 if (remainingApis.length === 0) {
                     showInfo(await i18n.t('messages.info.all_apis_removed'));
                 }
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                return showMenu();
 
             } catch (removeError) {
                 showError(await i18n.t('errors.api.failed_remove', removeError.message));
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-                return showMenu();
             }
         } else {
             showInfo(await i18n.t('messages.info.removal_cancelled'));
             await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-            return showMenu();
         }
 
     } catch (error) {
         forceStdinCleanup();
         showError('Failed to remove API', [error.message]);
         await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
+    }
+}
+
+/**
+ * Clear all APIs with confirmation
+ */
+async function clearAllApis() {
+    const { simpleInput } = require('./lib/ui/prompts');
+
+    const apis = apiManager.getApis();
+    const count = apis.length;
+
+    if (count === 0) {
+        console.clear();
+        showInfo(await i18n.t('messages.info.no_apis'));
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+        return;
+    }
+
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.red + '⚠️  ' + await i18n.t('menu.remove_api.clear_all') + colors.reset);
+    console.log('');
+    console.log(colors.yellow + '  ' + await i18n.t('messages.prompts.confirm_clear_all', count) + colors.reset);
+    console.log('');
+
+    const input = await simpleInput(colors.cyan + '  ' + await i18n.t('messages.prompts.confirm_clear_all_input') + colors.reset);
+
+    if (input === 'CLEAR') {
+        const clearedCount = apiManager.clearAllApis();
+        console.clear();
+        showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+    } else {
+        showInfo(await i18n.t('messages.info.clear_cancelled'));
+        await waitForKey(await i18n.t('messages.prompts.press_any_key'));
     }
 }
 
