@@ -25,11 +25,12 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Strong password requirements and validation
 
 ### 🚀 **Third-party API Management**
-- Full support for multiple third-party API providers (OpenAI, Anthropic, DeepSeek, Kimi, MiniMax, GLM (ZhiPu AI), and more)
+- Full support for multiple third-party API providers (OpenAI, Anthropic, DeepSeek, Kimi, MiniMax, GLM/ZhiPu AI, and custom APIs)
 - Interactive API configuration with validation
-- API usage statistics and tracking
+- API usage statistics with success/failure tracking
+- Model upgrade notifications and auto-upgrade support
 - Secure configuration backup and restore
-- Easy API switching and removal
+- Easy API switching, removal, and bulk clear
 
 ### 🌍 **Enterprise-grade Features**
 - Global installation - use `claude-launcher` from anywhere
@@ -85,7 +86,11 @@ node claude-launcher
 2. **Launch Claude Code (Skip Permissions)** - Launch with `--dangerously-skip-permissions`
 3. **Launch Claude Code with Third-party API** - Use configured third-party API
 4. **Launch Claude Code with Third-party API (Skip Permissions)** - Combine third-party API with permission skipping
-5. **Third-party API Management** - Configure, switch, remove APIs, view statistics
+5. **Third-party API Management** - Full API lifecycle management:
+   - Add, switch, and remove APIs
+   - View usage statistics with success/failure rates
+   - Model upgrade settings (auto/manual upgrade)
+   - Import/export configurations
 6. **Language Settings** - Switch between 11 supported languages
 7. **Version Update Check** - Check for launcher updates
 8. **Exit** - Close the launcher
@@ -126,14 +131,22 @@ Access comprehensive API management through the dedicated menu:
 📋 Third-party API Management
 
   → Add New API
-    Remove API
+    Remove API          → Delete Single API / Clear All APIs
     Switch Active API
-    View Statistics
+    View Statistics     → View Details / Reset Statistics
+    Model Upgrade       → Auto Upgrade [ON/OFF] / Manual Upgrade
     Export Configuration
     Import Configuration
     Change Password
     Back to Main Menu
 ```
+
+### Model Upgrade Feature
+
+The launcher automatically checks for model upgrades when you start:
+- **Auto Upgrade**: Automatically use the latest model version
+- **Manual Upgrade**: Review and confirm each model upgrade
+- **Startup Notifications**: Get notified when newer model versions are available
 
 ## ⚙️ Configuration
 
@@ -158,10 +171,11 @@ Claude Launcher 2.0 uses an advanced configuration system:
 
 Configure any third-party API provider through the interactive interface:
 
-- **Supported Providers**: OpenAI, Anthropic, DeepSeek, Kimi, MiniMax (CN/Global), GLM (ZhiPu AI), and custom APIs
+- **Supported Providers**: Anthropic, OpenAI, DeepSeek, Moonshot/Kimi, MiniMax (CN/Global), GLM/ZhiPu AI (GLM-4, GLM-5), and custom Anthropic-compatible APIs
 - **Secure Storage**: All API tokens encrypted before storage
 - **Validation**: Real-time validation of URLs, tokens, and models
-- **Usage Tracking**: Monitor API usage statistics
+- **Usage Tracking**: Monitor API usage statistics with success/failure rates
+- **Model Upgrade**: Automatic detection and upgrade to latest model versions
 - **Provider-specific Features**: Optimized configuration for each provider with helpful notes and recommendations
 
 ### Configuration Import/Export
