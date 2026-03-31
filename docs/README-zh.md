@@ -25,7 +25,7 @@
 - 强密码要求和验证
 
 ### 🚀 **第三方 API 管理**
-- 全面支持多个第三方 API 提供商（Anthropic、OpenAI、DeepSeek、Moonshot/Kimi、MiniMax、GLM/智谱AI 和自定义 API）
+- 全面支持多个第三方 API 提供商（Anthropic、DeepSeek、Kimi K2.5、MiniMax M2.7、GLM-5.1/智谱AI 和自定义 API）
 - 带验证的交互式 API 配置
 - API 使用统计，支持成功/失败率追踪
 - 模型升级通知和自动升级支持
@@ -84,16 +84,17 @@ node claude-launcher
 
 1. **启动 Claude Code** - 标准 Claude Code 启动
 2. **启动 Claude Code（跳过权限）** - 使用 `--dangerously-skip-permissions` 启动
-3. **使用第三方 API 启动 Claude Code** - 使用配置的第三方 API
-4. **使用第三方 API 启动 Claude Code（跳过权限）** - 结合第三方 API 和跳过权限
-5. **第三方 API 管理** - 完整的 API 生命周期管理：
+3. **启动 Claude Code（启用自动模式）** - 使用 `--enable-auto-mode` 启动，支持分类器自动审批（Team 计划；启动后按 Shift+Tab 切换）
+4. **使用第三方 API 启动 Claude Code** - 使用配置的第三方 API
+5. **使用第三方 API 启动 Claude Code（跳过权限）** - 结合第三方 API 和跳过权限
+6. **第三方 API 管理** - 完整的 API 生命周期管理：
    - 添加、切换和删除 API
    - 查看使用统计（含成功/失败率）
    - 模型升级设置（自动/手动升级）
    - 导入/导出配置
-6. **语言设置** - 在11种支持的语言之间切换
-7. **版本更新检查** - 检查启动器更新
-8. **退出** - 关闭启动器
+7. **语言设置** - 在11种支持的语言之间切换
+8. **版本更新检查** - 检查启动器更新
+9. **退出** - 关闭启动器
 
 ### 交互式导航
 
@@ -115,6 +116,7 @@ $ claude-launcher
 
   → 启动 Claude Code
     启动 Claude Code（跳过权限）
+    启动 Claude Code（启用自动模式）
     使用第三方 API 启动 Claude Code
     使用第三方 API 启动 Claude Code（跳过权限）
     第三方 API 管理
@@ -171,7 +173,7 @@ Claude Launcher 2.0 使用先进的配置系统：
 
 通过交互界面配置任何第三方 API 提供商：
 
-- **支持的提供商**：Anthropic、OpenAI、DeepSeek、Moonshot/Kimi、MiniMax（国内版/国际版）、GLM/智谱AI（GLM-4、GLM-5）和自定义 Anthropic 兼容 API
+- **支持的提供商**：Anthropic、DeepSeek、Moonshot/Kimi（K2.5）、MiniMax（国内版/国际版，M2.7）、GLM/智谱AI（GLM-5.1）和自定义 Anthropic 兼容 API
 - **安全存储**：所有 API 令牌在存储前加密
 - **验证**：URL、令牌和模型的实时验证
 - **使用跟踪**：监控 API 使用统计，支持成功/失败率追踪
@@ -210,6 +212,12 @@ Claude Launcher 2.0 使用先进的配置系统：
 git clone https://github.com/kikkimo/claude-launcher.git
 cd claude-launcher
 npm install
+```
+
+### 运行测试
+
+```bash
+npm test
 ```
 
 ### 本地测试
