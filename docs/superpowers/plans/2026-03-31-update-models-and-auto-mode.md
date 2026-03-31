@@ -33,6 +33,7 @@
 | `lib/i18n/locales/ru.js` | Modify | Add 4 new i18n keys (Russian) |
 | `test/providers.test.js` | Create | Tests for updated provider configs |
 | `test/menu-hints.test.js` | Create | Tests for hintCallback rendering |
+| `package.json` | Modify | Wire `npm test` to run both test files |
 
 ---
 
@@ -723,6 +724,59 @@ test('displayMenu: backward compat — works without hintCallback', () => {
     assert.strictEqual(hintLines.length, 0);
 });
 
+// ─── navigate() stores and passes through hintCallback ───
+
+test('navigate: stores hintCallback on instance', () => {
+    const m = new Menu();
+    m.setOptions(['A', 'B']);
+    const cb = (idx) => idx === 0 ? 'hint' : null;
+    // We can't fully run navigate() (it blocks on stdin), but we can
+    // verify the storage path by calling displayMenu via navigate's
+    // internal contract. Simulate what navigate does before blocking:
+    m.versionInfo = 'v1';
+    m.hintCallback = cb;
+    // After navigate() stores these, arrow key redraws call:
+    //   this.displayMenu(true, this.versionInfo, this.hintCallback)
+    // Verify this path renders the hint:
+    m.selectedIndex = 0;
+    const logs = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
+    assert.ok(logs.some(l => l.includes('hint')));
+});
+
+test('navigate: arrow key redraw uses stored hintCallback (simulated)', () => {
+    const m = new Menu();
+    m.setOptions(['A', 'B', 'C']);
+    const cb = (idx) => {
+        if (idx === 1) return 'Hint for B';
+        return null;
+    };
+    // Simulate what navigate() stores
+    m.versionInfo = null;
+    m.hintCallback = cb;
+
+    // Simulate up arrow: selectedIndex moves to 1
+    m.selectedIndex = 1;
+    const logs1 = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
+    assert.ok(logs1.some(l => l.includes('Hint for B')), 'Should show hint after arrow to index 1');
+
+    // Simulate another arrow: selectedIndex moves to 2
+    m.selectedIndex = 2;
+    const logs2 = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
+    assert.ok(!logs2.some(l => l.includes('ℹ')), 'Should hide hint after arrow to index 2');
+});
+
+test('navigate: hintCallback defaults to null when not provided', () => {
+    const m = new Menu();
+    m.setOptions(['A']);
+    // Simulate navigate(false, 'info') without 3rd arg
+    m.versionInfo = 'info';
+    m.hintCallback = null; // default
+    m.selectedIndex = 0;
+    const logs = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
+    const hintLines = logs.filter(l => l.includes('ℹ'));
+    assert.strictEqual(hintLines.length, 0);
+});
+
 // ─── Summary ───
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
@@ -934,11 +988,35 @@ New `hints` section:
     },
 ```
 
-- [ ] **Step 12: Verify — load all locales without errors**
+- [ ] **Step 12: Verify — check all 4 keys exist and resolve in every locale**
 
-Run: `node -e "const locales = ['en','zh','zh-TW','ja','ko','de','fr','es','it','pt','ru']; locales.forEach(l => { const m = require('./lib/i18n/locales/' + l); console.log(l + ': launch_auto_mode=' + (m.menu.main.launch_auto_mode ? 'OK' : 'MISSING') + ', hints=' + (m.hints ? 'OK' : 'MISSING')); });"`
+Run:
+```bash
+node -e "
+const locales = ['en','zh','zh-TW','ja','ko','de','fr','es','it','pt','ru'];
+const keys = [
+  ['menu.main.launch_auto_mode', m => m.menu.main.launch_auto_mode],
+  ['hints.auto_mode_info',       m => m.hints && m.hints.auto_mode_info],
+  ['hints.active_api_info',      m => m.hints && m.hints.active_api_info],
+  ['hints.no_active_api',        m => m.hints && m.hints.no_active_api]
+];
+let ok = true;
+locales.forEach(l => {
+  const m = require('./lib/i18n/locales/' + l);
+  keys.forEach(([name, getter]) => {
+    const val = getter(m);
+    if (!val || val === name) {
+      console.log('FAIL ' + l + ': ' + name + ' = ' + JSON.stringify(val));
+      ok = false;
+    }
+  });
+  if (ok) console.log(l + ': all 4 keys OK');
+});
+if (!ok) { console.log('FAILED'); process.exit(1); }
+"
+```
 
-Expected: all 11 lines show `launch_auto_mode=OK, hints=OK`.
+Expected: all 11 lines show `all 4 keys OK`. If any key is missing or returns itself as a string, the check fails.
 
 - [ ] **Step 13: Commit**
 
@@ -1160,7 +1238,41 @@ git commit -m "feat: add auto mode menu item, dynamic hints, and shift menu indi
 
 ---
 
-### Task 10: Manual smoke test
+### Task 10: Wire npm test to run both test files
+
+**Files:**
+- Modify: `package.json:11` (scripts.test)
+
+- [ ] **Step 1: Update package.json test script**
+
+In `package.json`, change line 11 from:
+
+```json
+    "test": "echo \"No tests specified\" && exit 0",
+```
+
+to:
+
+```json
+    "test": "node test/providers.test.js && node test/menu-hints.test.js",
+```
+
+- [ ] **Step 2: Verify — run npm test**
+
+Run: `npm test`
+
+Expected: Both test files execute and all tests pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add package.json
+git commit -m "chore: wire npm test to run provider and menu hint tests"
+```
+
+---
+
+### Task 11: Manual smoke test
 
 - [ ] **Step 1: Launch the app**
 
