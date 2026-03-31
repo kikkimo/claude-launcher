@@ -130,6 +130,8 @@ navigate(clearScreen = true, versionInfo = null, hintCallback = null)
 
 This preserves backward compatibility with all existing call sites that pass `(clearScreen, versionInfo)`.
 
+**Sync constraint:** `hintCallback` must be a **synchronous** function returning `string | null`. The menu redraws synchronously inside the raw-mode keypress handler (`lib/ui/menu.js` handleKeyPress), which has no `await` space. Hint text must be pre-computed before calling `navigate()`, or the callback must use only `i18n.tSync()` / cached data — never `await i18n.t()`.
+
 **Rendering:** If `hintCallback` is provided and `hintCallback(this.selectedIndex)` returns a non-null string, the Menu rendering layer prepends the `ℹ` icon with `colors.cyan` and renders the hint text in `colors.gray` below the menu options. If it returns null, no hint line is rendered. **Locale values must be pure text without the `ℹ` prefix** — the icon and color are added by Menu, not by i18n strings.
 
 ### 3.2 Hint Rules
