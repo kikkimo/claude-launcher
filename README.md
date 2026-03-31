@@ -25,7 +25,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Strong password requirements and validation
 
 ### 🚀 **Third-party API Management**
-- Full support for multiple third-party API providers (OpenAI, Anthropic, DeepSeek, Kimi, MiniMax, GLM/ZhiPu AI, and custom APIs)
+- Full support for multiple third-party API providers (Anthropic, DeepSeek, Kimi K2.5, MiniMax M2.7, GLM-5.1/ZhiPu AI, and custom APIs)
 - Interactive API configuration with validation
 - API usage statistics with success/failure tracking
 - Model upgrade notifications and auto-upgrade support
@@ -84,16 +84,17 @@ node claude-launcher
 
 1. **Launch Claude Code** - Standard Claude Code launch
 2. **Launch Claude Code (Skip Permissions)** - Launch with `--dangerously-skip-permissions`
-3. **Launch Claude Code with Third-party API** - Use configured third-party API
-4. **Launch Claude Code with Third-party API (Skip Permissions)** - Combine third-party API with permission skipping
-5. **Third-party API Management** - Full API lifecycle management:
+3. **Launch Claude Code (Enable Auto Mode)** - Launch with `--enable-auto-mode` for classifier-gated auto approvals (Team plan; Shift+Tab to switch)
+4. **Launch Claude Code with Third-party API** - Use configured third-party API
+5. **Launch Claude Code with Third-party API (Skip Permissions)** - Combine third-party API with permission skipping
+6. **Third-party API Management** - Full API lifecycle management:
    - Add, switch, and remove APIs
    - View usage statistics with success/failure rates
    - Model upgrade settings (auto/manual upgrade)
    - Import/export configurations
-6. **Language Settings** - Switch between 11 supported languages
-7. **Version Update Check** - Check for launcher updates
-8. **Exit** - Close the launcher
+7. **Language Settings** - Switch between 11 supported languages
+8. **Version Update Check** - Check for launcher updates
+9. **Exit** - Close the launcher
 
 ### Interactive Navigation
 
@@ -115,6 +116,7 @@ $ claude-launcher
 
   → Launch Claude Code
     Launch Claude Code (Skip Permissions)
+    Launch Claude Code (Enable Auto Mode)
     Launch Claude Code with Third-party API
     Launch Claude Code with Third-party API (Skip Permissions)
     Third-party API Management
@@ -171,7 +173,7 @@ Claude Launcher 2.0 uses an advanced configuration system:
 
 Configure any third-party API provider through the interactive interface:
 
-- **Supported Providers**: Anthropic, OpenAI, DeepSeek, Moonshot/Kimi, MiniMax (CN/Global), GLM/ZhiPu AI (GLM-4, GLM-5), and custom Anthropic-compatible APIs
+- **Supported Providers**: Anthropic, DeepSeek, Moonshot/Kimi (K2.5), MiniMax (CN/Global, M2.7), GLM/ZhiPu AI (GLM-5.1), and custom Anthropic-compatible APIs
 - **Secure Storage**: All API tokens encrypted before storage
 - **Validation**: Real-time validation of URLs, tokens, and models
 - **Usage Tracking**: Monitor API usage statistics with success/failure rates
@@ -210,6 +212,12 @@ With password protection enabled:
 git clone https://github.com/kikkimo/claude-launcher.git
 cd claude-launcher
 npm install
+```
+
+### Running Tests
+
+```bash
+npm test
 ```
 
 ### Testing Locally
