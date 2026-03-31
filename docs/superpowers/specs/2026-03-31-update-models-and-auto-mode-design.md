@@ -130,25 +130,27 @@ navigate(clearScreen = true, versionInfo = null, hintCallback = null)
 
 This preserves backward compatibility with all existing call sites that pass `(clearScreen, versionInfo)`.
 
-**Rendering:** If `hintCallback` is provided and `hintCallback(this.selectedIndex)` returns a non-null string, render it below the menu options with `colors.cyan` prefix `ℹ` icon. If it returns null, no hint line is rendered.
+**Rendering:** If `hintCallback` is provided and `hintCallback(this.selectedIndex)` returns a non-null string, the Menu rendering layer prepends the `ℹ` icon with `colors.cyan` and renders the hint text in `colors.gray` below the menu options. If it returns null, no hint line is rendered. **Locale values must be pure text without the `ℹ` prefix** — the icon and color are added by Menu, not by i18n strings.
 
 ### 3.2 Hint Rules
 
-| Selected Index | Hint Content |
+| Selected Index | Hint text returned by hintCallback (no icon prefix) |
 |---|---|
-| 0 (Default Launch) | No hint |
-| 1 (Skip Permissions) | No hint |
-| 2 (Enable Auto Mode) | `"ℹ Auto Mode: Currently supports Team plan. Enterprise/API rolling out. Use Shift+Tab to switch after launch."` |
-| 3 (3rd-party API) | Active API exists: `"ℹ Active: {providerName} / {model}"`; No API: `"ℹ No active API configured. Go to 'API Management' to add one."` |
+| 0 (Default Launch) | `null` (no hint) |
+| 1 (Skip Permissions) | `null` (no hint) |
+| 2 (Enable Auto Mode) | `"Auto Mode: Currently supports Team plan. Enterprise/API rolling out. Use Shift+Tab to switch after launch."` |
+| 3 (3rd-party API) | Active API exists: `"Active: ZhiPu AI / glm-5.1"` (formatted from i18n); No API: `"No active API configured. Go to 'API Management' to add one."` |
 | 4 (3rd-party + Skip) | Same as index 3 |
-| 5-8 | No hint |
+| 5-8 | `null` (no hint) |
 
 ### 3.3 Hint i18n
 
-All hint strings go through the i18n system with new keys:
-- `hints.auto_mode_info` - Auto Mode plan support + Shift+Tab instruction
-- `hints.active_api_info` - Active API info hint (with `{provider}` and `{model}` placeholders)
-- `hints.no_active_api` - No API configured hint
+All hint strings go through the i18n system. **Placeholders use positional `{0}`, `{1}` format** to match the existing `MessageFormatter.format()` in `lib/i18n/formatter.js`. Locale values must NOT include the `ℹ` icon prefix.
+
+New keys:
+- `hints.auto_mode_info` — e.g. `'Auto Mode: Currently supports Team plan. Enterprise/API rolling out. Use Shift+Tab to switch after launch.'`
+- `hints.active_api_info` — e.g. `'Active: {0} / {1}'` (where `{0}` = provider name, `{1}` = model)
+- `hints.no_active_api` — e.g. `'No active API configured. Go to "API Management" to add one.'`
 
 ---
 
@@ -157,9 +159,9 @@ All hint strings go through the i18n system with new keys:
 All 11 locale files need new entries:
 
 - `menu.main.launch_auto_mode` - Menu item text for "Launch Claude Code (Enable Auto Mode)"
-- `hints.auto_mode_info` - Auto Mode plan support + usage hint
-- `hints.active_api_info` - Active API info hint (with `{provider}` and `{model}` placeholders)
-- `hints.no_active_api` - No API configured hint
+- `hints.auto_mode_info` - Pure text, no icon prefix
+- `hints.active_api_info` - Uses `{0}` for provider name, `{1}` for model name
+- `hints.no_active_api` - Pure text, no icon prefix
 
 ---
 
