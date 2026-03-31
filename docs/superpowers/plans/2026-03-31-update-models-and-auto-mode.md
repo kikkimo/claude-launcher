@@ -724,70 +724,178 @@ test('displayMenu: backward compat — works without hintCallback', () => {
     assert.strictEqual(hintLines.length, 0);
 });
 
-// ─── navigate() stores and passes through hintCallback ───
+// ─── navigate() pass-through and arrow-key redraw ───
+// These tests call navigate() for real with a stubbed stdinManager,
+// then inject arrow keys and Enter to drive the menu and capture output.
 
-test('navigate: stores hintCallback on instance', () => {
+const EventEmitter = require('events');
+const stdinManager = require('../lib/utils/stdin-manager');
+
+// Helper: create a fake StdinScope that records 'data' handlers
+// and allows us to inject key sequences
+function createFakeScope() {
+    const emitter = new EventEmitter();
+    emitter.release = () => {};
+    emitter.removeListener = (ev, fn) => emitter.off(ev, fn);
+    return emitter;
+}
+
+// Helper: run an async test (navigate returns a Promise)
+function asyncTest(name, fn) {
+    const p = fn().then(() => {
+        passed++;
+        console.log(`  ✓ ${name}`);
+    }).catch((e) => {
+        failed++;
+        console.log(`  ✗ ${name}`);
+        console.log(`    ${e.message}`);
+    });
+    return p;
+}
+
+// We need process.stdin.isTTY = true for navigate() to use raw mode path
+const origIsTTY = process.stdin.isTTY;
+
+const allAsync = Promise.resolve()
+
+.then(() => asyncTest('navigate: accepts hintCallback 3rd param and renders hint on initial draw', async () => {
+    const fakeScope = createFakeScope();
+    const origAcquire = stdinManager.acquire.bind(stdinManager);
+    stdinManager.acquire = () => fakeScope;
+    process.stdin.isTTY = true;
+
     const m = new Menu();
     m.setOptions(['A', 'B']);
-    const cb = (idx) => idx === 0 ? 'hint' : null;
-    // We can't fully run navigate() (it blocks on stdin), but we can
-    // verify the storage path by calling displayMenu via navigate's
-    // internal contract. Simulate what navigate does before blocking:
-    m.versionInfo = 'v1';
-    m.hintCallback = cb;
-    // After navigate() stores these, arrow key redraws call:
-    //   this.displayMenu(true, this.versionInfo, this.hintCallback)
-    // Verify this path renders the hint:
-    m.selectedIndex = 0;
-    const logs = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
-    assert.ok(logs.some(l => l.includes('hint')));
-});
+    const cb = (idx) => idx === 0 ? 'Initial hint' : null;
 
-test('navigate: arrow key redraw uses stored hintCallback (simulated)', () => {
+    let initialLogs = [];
+    const origLog = console.log;
+    const origClear = console.clear;
+    console.log = (...args) => initialLogs.push(args.join(' '));
+    console.clear = () => {};
+
+    const navPromise = m.navigate(false, null, cb);
+
+    // navigate() has now called displayMenu and registered the handler
+    // Capture is already in initialLogs. Resolve by sending Enter.
+    console.log = origLog;
+    console.clear = origClear;
+
+    fakeScope.emit('data', '\r'); // Enter → resolve
+    await navPromise;
+
+    stdinManager.acquire = origAcquire;
+    process.stdin.isTTY = origIsTTY;
+
+    assert.ok(initialLogs.some(l => l.includes('Initial hint')),
+        'Initial displayMenu call should render hint from callback');
+}))
+
+.then(() => asyncTest('navigate: arrow key redraw passes stored hintCallback', async () => {
+    const fakeScope = createFakeScope();
+    const origAcquire = stdinManager.acquire.bind(stdinManager);
+    stdinManager.acquire = () => fakeScope;
+    process.stdin.isTTY = true;
+
     const m = new Menu();
     m.setOptions(['A', 'B', 'C']);
     const cb = (idx) => {
         if (idx === 1) return 'Hint for B';
         return null;
     };
-    // Simulate what navigate() stores
-    m.versionInfo = null;
-    m.hintCallback = cb;
 
-    // Simulate up arrow: selectedIndex moves to 1
-    m.selectedIndex = 1;
-    const logs1 = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
-    assert.ok(logs1.some(l => l.includes('Hint for B')), 'Should show hint after arrow to index 1');
+    // Suppress initial draw
+    const origLog = console.log;
+    const origClear = console.clear;
+    console.log = () => {};
+    console.clear = () => {};
 
-    // Simulate another arrow: selectedIndex moves to 2
-    m.selectedIndex = 2;
-    const logs2 = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
-    assert.ok(!logs2.some(l => l.includes('ℹ')), 'Should hide hint after arrow to index 2');
-});
+    const navPromise = m.navigate(false, null, cb);
 
-test('navigate: hintCallback defaults to null when not provided', () => {
+    // Now inject Down arrow and capture the redraw
+    let downLogs = [];
+    console.log = (...args) => downLogs.push(args.join(' '));
+    fakeScope.emit('data', '\u001b[B'); // Down → index 1
+
+    console.log = origLog;
+    console.clear = origClear;
+
+    assert.ok(downLogs.some(l => l.includes('Hint for B')),
+        'After arrow down to index 1, hint should show "Hint for B"');
+
+    // Arrow down again to index 2 (no hint)
+    let downLogs2 = [];
+    console.log = (...args) => downLogs2.push(args.join(' '));
+    console.clear = () => {};
+    fakeScope.emit('data', '\u001b[B'); // Down → index 2
+    console.log = origLog;
+    console.clear = origClear;
+
+    assert.ok(!downLogs2.some(l => l.includes('ℹ')),
+        'After arrow down to index 2, no hint should appear');
+
+    // Resolve
+    console.log = () => {};
+    console.clear = () => {};
+    fakeScope.emit('data', '\r');
+    console.log = origLog;
+    console.clear = origClear;
+    await navPromise;
+
+    stdinManager.acquire = origAcquire;
+    process.stdin.isTTY = origIsTTY;
+}))
+
+.then(() => asyncTest('navigate: without hintCallback (2 args), no hint rendered on arrow', async () => {
+    const fakeScope = createFakeScope();
+    const origAcquire = stdinManager.acquire.bind(stdinManager);
+    stdinManager.acquire = () => fakeScope;
+    process.stdin.isTTY = true;
+
     const m = new Menu();
-    m.setOptions(['A']);
-    // Simulate navigate(false, 'info') without 3rd arg
-    m.versionInfo = 'info';
-    m.hintCallback = null; // default
-    m.selectedIndex = 0;
-    const logs = captureLog(() => m.displayMenu(true, m.versionInfo, m.hintCallback));
-    const hintLines = logs.filter(l => l.includes('ℹ'));
-    assert.strictEqual(hintLines.length, 0);
+    m.setOptions(['A', 'B']);
+
+    const origLog = console.log;
+    const origClear = console.clear;
+    console.log = () => {};
+    console.clear = () => {};
+
+    // Call with only 2 args (old contract)
+    const navPromise = m.navigate(false, null);
+
+    let downLogs = [];
+    console.log = (...args) => downLogs.push(args.join(' '));
+    fakeScope.emit('data', '\u001b[B'); // Down
+    console.log = origLog;
+    console.clear = origClear;
+
+    assert.ok(!downLogs.some(l => l.includes('ℹ')),
+        'Without hintCallback, no hint should appear on arrow');
+
+    console.log = () => {};
+    console.clear = () => {};
+    fakeScope.emit('data', '\r');
+    console.log = origLog;
+    console.clear = origClear;
+    await navPromise;
+
+    stdinManager.acquire = origAcquire;
+    process.stdin.isTTY = origIsTTY;
+}));
+
+// ─── Summary (after async tests complete) ───
+
+allAsync.then(() => {
+    console.log(`\n  ${passed} passed, ${failed} failed\n`);
+    if (failed > 0) process.exit(1);
 });
-
-// ─── Summary ───
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
 ```
 
 - [ ] **Step 2: Run tests — verify they pass**
 
 Run: `node test/menu-hints.test.js`
 
-Expected: All tests pass (0 failed).
+Expected: All tests pass (0 failed). The async navigate() tests run after the sync displayMenu() tests.
 
 - [ ] **Step 3: Commit**
 
