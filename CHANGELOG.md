@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-03-31
+
+### Added
+- **Claude Auto Mode Support**: New menu item "Launch Claude Code (Enable Auto Mode)" using `--enable-auto-mode` flag
+  - Enables auto mode as a selectable permission mode (switch with Shift+Tab in session)
+  - Currently supports Team plan; Enterprise/API plans rolling out
+- **Dynamic Menu Hints**: Context-sensitive hints displayed below the main menu based on selected item
+  - Auto Mode item: Shows plan support info and Shift+Tab usage instruction
+  - Third-party API items: Shows active API provider/model or prompts to configure
+  - Hints auto-hide when selecting other menu items
+- **GLM-5.1 & GLM-5-Turbo Models**: Added latest ZhiPu AI models for both `zhipu` and `zai` providers
+  - New models: `glm-5.1` (latest), `glm-5-turbo`
+  - Removed deprecated: `glm-4.5`, `glm-4.6`
+  - All older models now suggest upgrade to `glm-5.1`
+- **Kimi K2.5 Model**: Added latest Moonshot AI model for `moonshot` provider
+  - New model: `kimi-k2.5` (latest, multimodal, 256K context)
+  - Removed deprecated: `kimi-k2-0711-preview`, `kimi-k2-0905-preview`, `kimi-k2-turbo-preview`
+  - All older models now suggest upgrade to `kimi-k2.5`
+- **MiniMax M2.7 & M2.5 Models**: Added latest MiniMax models for both `minimax_cn` and `minimax_global` providers
+  - New models: `MiniMax-M2.7` (latest), `MiniMax-M2.5`
+  - Older models now suggest upgrade to `MiniMax-M2.7`
+- **Automated Test Suite**: Added test infrastructure with `npm test` entry point
+  - Provider model configuration tests (28 tests)
+  - Menu hintCallback rendering tests including navigate() stub tests (8 tests)
+
+### Changed
+- **Menu Structure**: Main menu now has 9 items (was 8), with Auto Mode at position 3
+- **i18n**: All 11 locale files updated with 4 new translation keys for Auto Mode and hints
+
 ## [2.4.0] - 2026-02-12
 
 ### Added
