@@ -1020,7 +1020,7 @@ async function executeSelection(selectedIndex) {
 /**
  * Show configuration management submenu
  */
-async function showConfigManagement() {
+async function showConfigManagement(restoreIndex = 0) {
     const versionChecker = require('./lib/utils/version-checker');
     const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
 
@@ -1071,6 +1071,7 @@ async function showConfigManagement() {
 
     initializeGlobalMenus();
     globalConfigMenu.setOptions(menuOptions);
+    globalConfigMenu.selectedIndex = restoreIndex;
     const choice = await globalConfigMenu.navigate(false, null, hintCallback);
 
     switch (choice) {
@@ -1081,28 +1082,28 @@ async function showConfigManagement() {
             const newVal = !config.autoModelUpgrade;
             config.autoModelUpgrade = newVal;
             await versionChecker.saveConfig(config);
-            return showConfigManagement();
+            return showConfigManagement(1);
         }
 
         case 2: { // Model Upgrade Notification toggle
             const newVal = config.showModelUpgradeNotification === false ? true : false;
             config.showModelUpgradeNotification = newVal;
             await versionChecker.saveConfig(config);
-            return showConfigManagement();
+            return showConfigManagement(2);
         }
 
         case 3: { // Telemetry toggle
             const newVal = config.disableTelemetry === false ? true : false;
             config.disableTelemetry = newVal;
             await versionChecker.saveConfig(config);
-            return showConfigManagement();
+            return showConfigManagement(3);
         }
 
         case 4: { // API Launch Mode toggle
             const newVal = config.apiLaunchMode === 'select' ? 'direct' : 'select';
             config.apiLaunchMode = newVal;
             await versionChecker.saveConfig(config);
-            return showConfigManagement();
+            return showConfigManagement(4);
         }
 
         case 5: // Back
