@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node claude-launcher",
-    "test": "node test/providers.test.js && node test/menu-hints.test.js",
+    "test": "node test/providers.test.js && node test/menu-hints.test.js && node test/version-checker.test.js && node test/api-manager.test.js && node test/launcher.test.js && node test/config-management.test.js && node test/api-select.test.js",
     "prepublishOnly": "echo \"Publishing claude-launcher...\"",
     "postinstall": "echo \"Claude Launcher installed successfully! Run 'claude-launcher' to start.\"",
     "publish:public": "npm publish --access public"

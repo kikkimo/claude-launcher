@@ -85,6 +85,19 @@ test('loadConfigSync: returns full defaults when file missing', () => {
     assert.strictEqual(config.language, 'zh');
 });
 
+// ─── notification_hint menu path verification ───
+
+test('model_upgrade.notification_hint references correct menu paths', () => {
+    const en = require('../lib/i18n/locales/en.js');
+    const hint = en.model_upgrade.notification_hint;
+    assert.ok(hint.includes('Configuration Management'),
+        'notification_hint should reference Configuration Management');
+    assert.ok(hint.includes('Manual Model Upgrade'),
+        'notification_hint should reference Manual Model Upgrade');
+    assert.ok(!hint.includes('Model Upgrade Settings'),
+        'notification_hint should NOT reference old Model Upgrade Settings path');
+});
+
 // ─── loadConfig async tests ───
 
 (async () => {
