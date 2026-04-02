@@ -881,10 +881,18 @@ async function showApiSelectMenu(skipPermissions = false) {
 
     const activeApi = apiManager.getActiveApi();
 
-    // Build menu items with alignment
-    const menuItems = apis.map((api, idx) => {
+    // Build menu items with two-column alignment
+    // Compute max name width (including ● prefix) for consistent column alignment
+    let maxNameWidth = 0;
+    apis.forEach(api => {
+        const w = getStringWidth('● ' + api.name);
+        if (w > maxNameWidth) maxNameWidth = w;
+    });
+
+    const menuItems = apis.map((api) => {
         const prefix = (activeApi && activeApi.id === api.id) ? '● ' : '  ';
-        return `${prefix}${api.name}  ${api.model}`;
+        const nameCol = prefix + api.name;
+        return padStringToWidth(nameCol, maxNameWidth + 4) + api.model;
     });
     menuItems.push(i18n.tSync('menu.api_select.back'));
 
