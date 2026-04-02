@@ -176,6 +176,15 @@ test('invariant: the first model in each provider has no versionAlias (is the la
     }
 });
 
+// ─── selectProvider export ───
+
+console.log('\nselectProvider export:');
+
+test('selectProvider is exported from prompts.js', () => {
+    const prompts = require('../lib/ui/prompts');
+    assert.strictEqual(typeof prompts.selectProvider, 'function');
+});
+
 // ─── Summary ───
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
