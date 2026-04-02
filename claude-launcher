@@ -66,6 +66,7 @@ const apiManager = new ApiManager();
 let globalMainMenu = null;
 let globalConfirmMenu = null;
 let globalApiManagementMenu = null;
+let globalConfigMenu = null;
 
 /**
  * Initialize global menu objects to prevent recreation and screen flickering
@@ -79,6 +80,9 @@ function initializeGlobalMenus() {
     }
     if (!globalApiManagementMenu) {
         globalApiManagementMenu = new Menu();
+    }
+    if (!globalConfigMenu) {
+        globalConfigMenu = new Menu();
     }
 }
 
@@ -983,8 +987,8 @@ async function executeSelection(selectedIndex) {
         case 5: // 3rd-party API Management
             return await showApiManagementMenu();
 
-        case 6: // Language Settings
-            return await showLanguageSettings();
+        case 6: // Configuration Management
+            return await showConfigManagement();
 
         case 7: // Version Update Check
             return await showVersionUpdateCheck();
@@ -998,6 +1002,101 @@ async function executeSelection(selectedIndex) {
         default:
             showMenu();
             break;
+    }
+}
+
+/**
+ * Show configuration management submenu
+ */
+async function showConfigManagement() {
+    const versionChecker = require('./lib/utils/version-checker');
+    const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+
+    const config = await versionChecker.loadConfig();
+
+    // Build labels with padding to align current values
+    const labelWidth = 40;
+
+    const langName = i18n.getCurrentLanguageName();
+    const autoUpgradeVal = config.autoModelUpgrade
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const upgradeNotifVal = config.showModelUpgradeNotification !== false
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const telemetryVal = config.disableTelemetry !== false
+        ? i18n.tSync('config.values.recommended_off')
+        : i18n.tSync('config.values.on');
+    const launchModeVal = config.apiLaunchMode === 'select'
+        ? i18n.tSync('config.values.select_mode')
+        : i18n.tSync('config.values.direct_mode');
+
+    const menuOptions = [
+        padStringToWidth(i18n.tSync('menu.config.language'), labelWidth) + langName,
+        padStringToWidth(i18n.tSync('menu.config.auto_model_upgrade'), labelWidth) + autoUpgradeVal,
+        padStringToWidth(i18n.tSync('menu.config.model_upgrade_notification'), labelWidth) + upgradeNotifVal,
+        padStringToWidth(i18n.tSync('menu.config.telemetry'), labelWidth) + telemetryVal,
+        padStringToWidth(i18n.tSync('menu.config.api_launch_mode'), labelWidth) + launchModeVal,
+        i18n.tSync('menu.config.back')
+    ];
+
+    // Synchronous hint callback for config items
+    const hintCallback = (selectedIndex) => {
+        switch (selectedIndex) {
+            case 0: return i18n.tSync('hints.config.language', langName);
+            case 1: return i18n.tSync('hints.config.auto_upgrade');
+            case 2: return i18n.tSync('hints.config.upgrade_notification');
+            case 3: return i18n.tSync('hints.config.telemetry');
+            case 4: return i18n.tSync('hints.config.launch_mode');
+            default: return null;
+        }
+    };
+
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '⚙️  ' + i18n.tSync('menu.config.title') + colors.reset);
+    console.log('');
+
+    initializeGlobalMenus();
+    globalConfigMenu.setOptions(menuOptions);
+    const choice = await globalConfigMenu.navigate(false, null, hintCallback);
+
+    switch (choice) {
+        case 0: // Language Settings
+            return await showLanguageSettings();
+
+        case 1: { // Auto Model Upgrade toggle
+            const newVal = !config.autoModelUpgrade;
+            config.autoModelUpgrade = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement();
+        }
+
+        case 2: { // Model Upgrade Notification toggle
+            const newVal = config.showModelUpgradeNotification === false ? true : false;
+            config.showModelUpgradeNotification = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement();
+        }
+
+        case 3: { // Telemetry toggle
+            const newVal = config.disableTelemetry === false ? true : false;
+            config.disableTelemetry = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement();
+        }
+
+        case 4: { // API Launch Mode toggle
+            const newVal = config.apiLaunchMode === 'select' ? 'direct' : 'select';
+            config.apiLaunchMode = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement();
+        }
+
+        case 5: // Back
+        case -1:
+        default:
+            return showMenu();
     }
 }
 
@@ -1047,6 +1146,9 @@ async function showMenu() {
     try {
         const upgradeChecker = require('./lib/utils/model-upgrade-checker');
         const autoUpgrade = await upgradeChecker.isAutoUpgradeEnabled();
+        const versionChecker = require('./lib/utils/version-checker');
+        const launcherConfig = await versionChecker.loadConfig();
+        const showUpgradeNotif = launcherConfig.showModelUpgradeNotification !== false;
 
         if (autoUpgrade) {
             // Auto upgrade enabled: always check and upgrade (bypass cache)
@@ -1062,8 +1164,8 @@ async function showMenu() {
                     }
                 }
             }
-        } else {
-            // Auto upgrade disabled: use cache for notification
+        } else if (showUpgradeNotif) {
+            // Auto upgrade disabled but notification enabled: use cache for notification
             const result = await upgradeChecker.checkForModelUpgrades(apiManager);
             if (result.needsCheck && result.upgrades.length > 0) {
                 const first = result.upgrades[0];
@@ -1102,31 +1204,96 @@ async function showMenu() {
         await i18n.t('menu.main.launch_api'),
         await i18n.t('menu.main.launch_api_skip'),
         await i18n.t('menu.main.api_management'),
-        await i18n.t('menu.main.language_settings'),
+        await i18n.t('menu.main.config_management'),
         await i18n.t('menu.main.version_check'),
         await i18n.t('menu.main.exit')
     ];
 
-    // Pre-compute hint texts synchronously for menu callback
+    // Pre-compute all hint data synchronously for menu callback
     const hintAutoMode = i18n.tSync('hints.auto_mode_info');
+
     const activeApi = apiManager.getActiveApi();
-    let hintApiInfo = null;
+    const apis = apiManager.getApis();
+    const apiCount = apis.length;
+    const { getProvider } = require('./lib/presets/providers');
+
+    // Pre-compute config for hints
+    const hintConfig = require('./lib/utils/version-checker').loadConfigSync();
+    const hintApiLaunchMode = hintConfig.apiLaunchMode || 'direct';
+
+    // Pre-compute active API details
+    let activeApiName = i18n.tSync('hints.select_mode_active_none');
+    let activeProviderName = '';
+    let activeModel = '';
+    let activeLastUsed = '';
     if (activeApi) {
-        const { getProvider } = require('./lib/presets/providers');
         const providerConfig = getProvider(activeApi.provider);
-        const providerName = providerConfig ? providerConfig.name : (activeApi.provider || 'Custom');
-        hintApiInfo = i18n.tSync('hints.active_api_info', providerName, activeApi.model);
-    } else {
-        hintApiInfo = i18n.tSync('hints.no_active_api');
+        activeProviderName = providerConfig ? providerConfig.name : (activeApi.provider || 'Custom');
+        activeModel = activeApi.model;
+        activeApiName = activeApi.name;
+        activeLastUsed = formatRelativeTime(activeApi.lastUsed || null);
     }
+
+    // Pre-compute API hints for indices 3, 4
+    let hintApiLines = null;
+    if (apiCount === 0) {
+        hintApiLines = i18n.tSync('hints.no_api_configured');
+    } else if (hintApiLaunchMode === 'direct') {
+        if (activeApi) {
+            hintApiLines =
+                i18n.tSync('hints.direct_mode_desc') + '\n' +
+                i18n.tSync('hints.direct_mode_api_info', activeApiName, activeProviderName) + '\n' +
+                i18n.tSync('hints.direct_mode_api_detail', activeModel, activeLastUsed) + '\n' +
+                i18n.tSync('hints.direct_mode_change');
+        } else {
+            hintApiLines =
+                i18n.tSync('hints.direct_mode_no_active') + '\n' +
+                i18n.tSync('hints.direct_mode_no_active_detail', apiCount) + '\n' +
+                '' + '\n' +
+                i18n.tSync('hints.direct_mode_change');
+        }
+    } else {
+        // select mode
+        hintApiLines =
+            i18n.tSync('hints.select_mode_desc') + '\n' +
+            i18n.tSync('hints.select_mode_change') + '\n' +
+            '' + '\n' +
+            i18n.tSync('hints.select_mode_api_count', apiCount, activeApiName);
+    }
+
+    // Pre-compute API management hint (index 5)
+    const hintApiMgmt = i18n.tSync('hints.api_management_info', apiCount, activeApiName);
+
+    // Pre-compute config summary hint (index 6)
+    const cfgLangName = i18n.getCurrentLanguageName();
+    const cfgLaunchMode = hintApiLaunchMode === 'select'
+        ? i18n.tSync('config.values.select_mode')
+        : i18n.tSync('config.values.direct_mode');
+    const cfgTelemetry = hintConfig.disableTelemetry !== false
+        ? i18n.tSync('config.values.off')
+        : i18n.tSync('config.values.on');
+    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry);
 
     // Synchronous hint callback — must not use await
     const hintCallback = (selectedIndex) => {
         switch (selectedIndex) {
-            case 2: return hintAutoMode;
-            case 3: return hintApiInfo;
-            case 4: return hintApiInfo;
-            default: return null;
+            case 0:
+            case 1:
+                return null;
+            case 2:
+                return hintAutoMode;
+            case 3:
+            case 4:
+                return hintApiLines;
+            case 5:
+                return hintApiMgmt;
+            case 6:
+                return hintConfigSummary;
+            case 7:
+            case 8:
+                return null;
+            default:
+                return null;
         }
     };
 
