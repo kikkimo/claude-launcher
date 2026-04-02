@@ -722,20 +722,18 @@ async function showApiManagementMenu() {
         await i18n.t('menu.api_management.add_new'),      // 0
         await i18n.t('menu.api_management.remove'),       // 1
         await i18n.t('menu.api_management.switch'),       // 2
-        await i18n.t('menu.api_management.statistics')    // 3
+        await i18n.t('menu.api_management.statistics'),   // 3
+        await i18n.t('menu.api_management.manual_upgrade') // 4
     ];
 
     // Add import/export options only if password is set
     if (apiManager.canUseImportExport()) {
-        menuOptions.push(await i18n.t('menu.api_management.export'));          // 4
-        menuOptions.push(await i18n.t('menu.api_management.import'));          // 5
-        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 6
+        menuOptions.push(await i18n.t('menu.api_management.export'));          // 5
+        menuOptions.push(await i18n.t('menu.api_management.import'));          // 6
+        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 7
     }
 
-    // Add model upgrade settings (always available)
-    menuOptions.push(await i18n.t('model_upgrade.settings_title'));  // 4 or 7 (depending on import/export)
-
-    menuOptions.push(await i18n.t('menu.api_management.back'));      // 5 or 8
+    menuOptions.push(await i18n.t('menu.api_management.back'));      // last
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
@@ -757,91 +755,32 @@ async function showApiManagementMenu() {
     } else if (choice === 3) { // View API Statistics
         await viewStatistics();
         return showMenu();
+    } else if (choice === 4) { // Manual Model Upgrade
+        await performManualUpgrade();
+        return showApiManagementMenu();
     } else if (apiManager.canUseImportExport()) {
-        // With import/export enabled: indices 4-8
-        if (choice === 4) { // Export Configuration
+        // With import/export enabled: indices 5-8
+        if (choice === 5) { // Export Configuration
             await exportConfiguration();
             return showMenu();
-        } else if (choice === 5) { // Import Configuration
+        } else if (choice === 6) { // Import Configuration
             await importConfiguration();
             return showMenu();
-        } else if (choice === 6) { // Change Password
+        } else if (choice === 7) { // Change Password
             await changePassword();
             return showMenu();
-        } else if (choice === 7) { // Model Upgrade Settings (NEW)
-            return await showModelUpgradeSettings();
         } else if (choice === 8) { // Back to Main Menu
             return showMenu();
         }
     } else {
-        // Without import/export: indices 4-5
-        if (choice === 4) { // Model Upgrade Settings (NEW)
-            return await showModelUpgradeSettings();
-        } else if (choice === 5) { // Back to Main Menu
+        // Without import/export: index 5 is Back
+        if (choice === 5) { // Back to Main Menu
             return showMenu();
         }
     }
 
     // Default fallback to main menu
     return showMenu();
-}
-
-/**
- * Show model upgrade settings menu
- */
-async function showModelUpgradeSettings() {
-    const versionChecker = require('./lib/utils/version-checker');
-    const upgradeChecker = require('./lib/utils/model-upgrade-checker');
-
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '⚙️  ' + await i18n.t('model_upgrade.settings_title') + colors.reset);
-    console.log('');
-
-    const config = await versionChecker.loadConfig();
-    const isAutoOn = config.autoModelUpgrade === true;
-
-    console.log(colors.cyan + '  ' + await i18n.t('model_upgrade.current_config') + ':' + colors.reset);
-    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
-        (isAutoOn
-            ? colors.green + await i18n.t('model_upgrade.auto_upgrade_on')
-            : colors.dim + await i18n.t('model_upgrade.auto_upgrade_off')
-        ) + colors.reset);
-    console.log('');
-
-    const menuOptions = [
-        isAutoOn
-            ? await i18n.t('model_upgrade.menu_toggle_auto_on')
-            : await i18n.t('model_upgrade.menu_toggle_auto_off'),
-        await i18n.t('model_upgrade.menu_manual_upgrade'),
-        await i18n.t('model_upgrade.menu_back')
-    ];
-
-    initializeGlobalMenus();
-    globalApiManagementMenu.setOptions(menuOptions);
-    const choice = await globalApiManagementMenu.navigate();
-
-    switch (choice) {
-        case 0: // Toggle auto upgrade
-            await versionChecker.setAutoModelUpgrade(!isAutoOn);
-            console.log('');
-            console.log(colors.green + '✓ ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
-                (!isAutoOn
-                    ? await i18n.t('model_upgrade.auto_upgrade_on')
-                    : await i18n.t('model_upgrade.auto_upgrade_off')
-                ) + colors.reset);
-            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-            return showModelUpgradeSettings();
-
-        case 1: // Manual upgrade
-            await performManualUpgrade();
-            return showModelUpgradeSettings();
-
-        case 2: // Back
-        case -1:
-        default:
-            return showApiManagementMenu();
-    }
 }
 
 /**
@@ -925,37 +864,110 @@ async function performManualUpgrade() {
 }
 
 /**
+ * Show API selection menu for select launch mode
+ */
+async function showApiSelectMenu(skipPermissions = false) {
+    const { padStringToWidth, getStringWidth } = require('./lib/utils/string-width');
+    const { getProvider } = require('./lib/presets/providers');
+
+    const apis = apiManager.getApis();
+
+    if (apis.length === 0) {
+        console.clear();
+        showInfo(i18n.tSync('hints.no_api_configured'), []);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
+        return showMenu();
+    }
+
+    const activeApi = apiManager.getActiveApi();
+
+    // Build menu items with alignment
+    const menuItems = apis.map((api, idx) => {
+        const prefix = (activeApi && activeApi.id === api.id) ? '● ' : '  ';
+        return `${prefix}${api.name}  ${api.model}`;
+    });
+    menuItems.push(i18n.tSync('menu.api_select.back'));
+
+    // Hint callback for each API item
+    const hintCallback = (selectedIndex) => {
+        if (selectedIndex >= apis.length) return null; // "Back" item
+        const api = apis[selectedIndex];
+        const providerConfig = getProvider(api.provider);
+        const providerName = providerConfig ? providerConfig.name : (api.provider || 'Custom');
+        const lastUsed = formatRelativeTime(api.lastUsed || null);
+        const usageCount = api.usageCount || 0;
+        return i18n.tSync('hints.api_select.info', api.name) + '\n' +
+               i18n.tSync('hints.api_select.detail', providerName, api.model) + '\n' +
+               i18n.tSync('hints.api_select.usage', usageCount, lastUsed);
+    };
+
+    console.clear();
+    console.log('');
+    console.log(colors.bright + colors.orange + '🔗 ' + i18n.tSync('menu.api_select.title') + colors.reset);
+    console.log('');
+
+    const selectMenu = new Menu();
+    selectMenu.setOptions(menuItems);
+    const choice = await selectMenu.navigate(false, null, hintCallback);
+
+    if (choice === -1 || choice === apis.length) {
+        // Back or Esc
+        return showMenu();
+    }
+
+    // User selected an API
+    const selectedApi = apis[choice];
+    try {
+        apiManager.setActiveApi(choice);
+        apiManager.recordLaunchAttempt();
+        launchClaudeWithApi(selectedApi, skipPermissions);
+    } catch (error) {
+        apiManager.rollbackLaunchAttempt(error.message);
+        showError(error.message);
+        setTimeout(() => { showMenu(); }, 2000);
+    }
+}
+
+/**
  * Handle third-party API launch
  */
 async function handleThirdPartyApiLaunch(skipPermissions = false) {
+    const { loadConfigSync } = require('./lib/utils/version-checker');
+    const config = loadConfigSync();
+
+    if (config.apiLaunchMode === 'select') {
+        return showApiSelectMenu(skipPermissions);
+    }
+
+    // Direct mode
+    const apis = apiManager.getApis();
+
+    if (apis.length === 0) {
+        console.clear();
+        showInfo(i18n.tSync('hints.no_api_configured'), []);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
+        return showMenu();
+    }
+
+    const activeApi = apiManager.getActiveApi();
+
+    if (activeApi === null) {
+        console.clear();
+        showInfo(i18n.tSync('launch.no_active_api'), [
+            i18n.tSync('launch.no_active_api_desc'),
+            i18n.tSync('launch.add_configure_first')
+        ]);
+        await waitForKey(i18n.tSync('launch.press_key_return'));
+        return showMenu();
+    }
+
     try {
-        const activeApi = apiManager.getActiveApi();
-
-        if (!activeApi) {
-            console.clear();
-            showInfo(i18n.tSync('launch.no_active_api'), [
-                i18n.tSync('launch.no_active_api_desc'),
-                i18n.tSync('launch.add_configure_first')
-            ]);
-
-            await waitForKey(i18n.tSync('launch.press_key_return'));
-            return showMenu();
-        }
-
-        // Record successful launch BEFORE launching (since process exits after)
-        apiManager.recordSuccessfulLaunch();
-
+        apiManager.recordLaunchAttempt();
         launchClaudeWithApi(activeApi, skipPermissions);
-
     } catch (error) {
-        // Record failed launch
-        apiManager.recordFailedLaunch(error.message);
-
+        apiManager.rollbackLaunchAttempt(error.message);
         showError('Failed to launch with third-party API', [error.message]);
-
-        setTimeout(() => {
-            showMenu();
-        }, 2000);
+        setTimeout(() => { showMenu(); }, 2000);
     }
 }
 
