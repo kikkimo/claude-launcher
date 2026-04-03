@@ -50,7 +50,7 @@ const {
     launchClaudeWithApi
 } = require('./lib/launcher');
 const { getPasswordInput } = require('./lib/auth/password-input');
-const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
+const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
 const i18n = require('./lib/i18n');
@@ -712,25 +712,25 @@ async function showApiManagementMenu() {
     if (apiManager.isFirstTimeUsage()) {
         const passwordChoice = await handleFirstTimePasswordSetup();
         if (!passwordChoice) {
-            // User chose to skip or canceled, return to main menu
             return showMenu();
         }
     }
 
     // Build menu options based on password setup status
     const menuOptions = [
-        await i18n.t('menu.api_management.add_new'),      // 0
-        await i18n.t('menu.api_management.remove'),       // 1
-        await i18n.t('menu.api_management.switch'),       // 2
-        await i18n.t('menu.api_management.statistics'),   // 3
-        await i18n.t('menu.api_management.manual_upgrade') // 4
+        await i18n.t('menu.api_management.add_new'),       // 0
+        await i18n.t('menu.api_management.edit'),           // 1
+        await i18n.t('menu.api_management.remove'),         // 2
+        await i18n.t('menu.api_management.switch'),         // 3
+        await i18n.t('menu.api_management.statistics'),     // 4
+        await i18n.t('menu.api_management.manual_upgrade')  // 5
     ];
 
     // Add import/export options only if password is set
     if (apiManager.canUseImportExport()) {
-        menuOptions.push(await i18n.t('menu.api_management.export'));          // 5
-        menuOptions.push(await i18n.t('menu.api_management.import'));          // 6
-        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 7
+        menuOptions.push(await i18n.t('menu.api_management.export'));          // 6
+        menuOptions.push(await i18n.t('menu.api_management.import'));          // 7
+        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 8
     }
 
     menuOptions.push(await i18n.t('menu.api_management.back'));      // last
@@ -740,46 +740,73 @@ async function showApiManagementMenu() {
 
     globalApiManagementMenu.setOptions(menuOptions);
 
-    const choice = await globalApiManagementMenu.navigate();
+    const hintCallback = (index) => {
+        if (!apiManager.hasExportPassword()) return null;
+        const passwordHints = {};
+        passwordHints[1] = i18n.tSync('hints.edit_password_required');
+        passwordHints[2] = i18n.tSync('hints.remove_password_required');
+        if (apiManager.canUseImportExport()) {
+            passwordHints[6] = i18n.tSync('hints.export_password_required');
+            passwordHints[7] = i18n.tSync('hints.import_password_required');
+        }
+        return passwordHints[index] || null;
+    };
+
+    const choice = await globalApiManagementMenu.navigate(null, null, hintCallback);
 
     // Handle menu choices based on current menu options
     if (choice === 0) { // Add New API
         await addNewThirdPartyApi();
         return showMenu();
-    } else if (choice === 1) { // Remove API
-        await removeThirdPartyApi();
-        return showMenu();
-    } else if (choice === 2) { // Switch Active API
+    }
+
+    if (choice === 1) { // Edit API
+        if (await passwordGuard(apiManager, 'edit')) {
+            // TODO: await editApi(apiManager); -- will be added in Task 7
+        }
+        return showApiManagementMenu();
+    }
+
+    if (choice === 2) { // Remove API
+        if (await passwordGuard(apiManager, 'delete')) {
+            await removeThirdPartyApi();
+        }
+        return showApiManagementMenu();
+    }
+
+    if (choice === 3) { // Switch Active API
         await switchThirdPartyApi();
         return showMenu();
-    } else if (choice === 3) { // View API Statistics
+    }
+
+    if (choice === 4) { // View API Statistics
         await viewStatistics();
         return showMenu();
-    } else if (choice === 4) { // Manual Model Upgrade
+    }
+
+    if (choice === 5) { // Manual Model Upgrade
         await performManualUpgrade();
         return showApiManagementMenu();
-    } else if (apiManager.canUseImportExport()) {
-        // With import/export enabled: indices 5-8
-        if (choice === 5) { // Export Configuration
+    }
+
+    if (apiManager.canUseImportExport()) {
+        if (choice === 6) { // Export Configuration
             await exportConfiguration();
-            return showMenu();
-        } else if (choice === 6) { // Import Configuration
-            await importConfiguration();
-            return showMenu();
-        } else if (choice === 7) { // Change Password
-            await changePassword();
-            return showMenu();
-        } else if (choice === 8) { // Back to Main Menu
-            return showMenu();
+            return showApiManagementMenu();
         }
-    } else {
-        // Without import/export: index 5 is Back
-        if (choice === 5) { // Back to Main Menu
+
+        if (choice === 7) { // Import Configuration
+            await importConfiguration();
+            return showApiManagementMenu();
+        }
+
+        if (choice === 8) { // Change Password
+            await changePassword();
             return showMenu();
         }
     }
 
-    // Default fallback to main menu
+    // Back to Main Menu (last item) or default fallback
     return showMenu();
 }
 
@@ -827,9 +854,14 @@ async function performManualUpgrade() {
             const answer = await simpleInput(colors.yellow + '       ' + await i18n.t('model_upgrade.manual_confirm') + ' ' + colors.reset);
 
             if (answer.toLowerCase() === 'y') {
-                apiManager.updateApiModel(api.id, latestModel);
-                console.log(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset);
-                upgradedCount++;
+                try {
+                    apiManager.updateApiModel(api.id, latestModel);
+                    console.log(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset);
+                    upgradedCount++;
+                } catch (error) {
+                    console.log(colors.yellow + '       ⚠️ Skipped: ' + error.message + colors.reset);
+                    skippedByUser++;
+                }
             } else {
                 console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_skipped') + colors.reset);
                 skippedByUser++;
@@ -1352,12 +1384,8 @@ async function exportConfiguration() {
     console.log('');
 
     // Verify password before export
-    const verified = await verifyExportPassword(apiManager, 'export');
-    if (!verified) {
-        console.log('');
-        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
-        return;
-    }
+    const verified = await passwordGuard(apiManager, 'export');
+    if (!verified) return;
 
     try {
         // Get export data
@@ -1394,7 +1422,7 @@ async function exportConfiguration() {
     }
 
     console.log('');
-    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
 }
 
 /**
@@ -1415,11 +1443,8 @@ async function importConfiguration() {
     console.log('');
 
     // Verify password identity
-    const passwordVerified = await verifyExportPassword(apiManager, 'import');
-    if (!passwordVerified) {
-        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
-        return;
-    }
+    const passwordVerified = await passwordGuard(apiManager, 'import');
+    if (!passwordVerified) return;
 
     console.log('');
     console.log(colors.cyan + '📁 ' + i18n.tSync('ui.general.file_input_required') + colors.reset);
@@ -1503,7 +1528,7 @@ async function importConfiguration() {
     }
 
     console.log('');
-    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
 }
 
 /**
