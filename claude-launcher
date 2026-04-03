@@ -53,6 +53,7 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
+const { editApi } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
 const fs = require('fs');
 const path = require('path');
@@ -762,7 +763,7 @@ async function showApiManagementMenu() {
 
     if (choice === 1) { // Edit API
         if (await passwordGuard(apiManager, 'edit')) {
-            // TODO: await editApi(apiManager); -- will be added in Task 7
+            await editApi(apiManager);
         }
         return showApiManagementMenu();
     }
