@@ -40,7 +40,7 @@ const Menu = require('../lib/ui/menu');
 test('displayMenu: null hintCallback outputs 4 empty lines after menu', () => {
     const m = new Menu();
     m.setOptions(['Option A', 'Option B']);
-    const logs = captureScreen(() => m.displayMenu(false, null, null));
+    const logs = captureScreen(() => m.displayMenu(null, null));
     const lastOptionIdx = logs.findIndex(l => l.includes('Option B'));
     const afterMenu = logs.slice(lastOptionIdx + 1);
     const emptyCount = afterMenu.filter(l => l.trim() === '').length;
@@ -51,7 +51,7 @@ test('displayMenu: hintCallback returning null outputs 4 empty lines', () => {
     const m = new Menu();
     m.setOptions(['A', 'B']);
     const cb = () => null;
-    const logs = captureScreen(() => m.displayMenu(false, null, cb));
+    const logs = captureScreen(() => m.displayMenu(null, cb));
     const hintLines = logs.filter(l => l.includes('\u2139'));
     assert.strictEqual(hintLines.length, 0);
 });
@@ -61,7 +61,7 @@ test('displayMenu: single-line hint pads to 4 lines total', () => {
     m.setOptions(['A', 'B']);
     m.selectedIndex = 0;
     const cb = () => 'Single line hint';
-    const logs = captureScreen(() => m.displayMenu(false, null, cb));
+    const logs = captureScreen(() => m.displayMenu(null, cb));
     const hintLines = logs.filter(l => l.includes('\u2139') && l.includes('Single line hint'));
     assert.strictEqual(hintLines.length, 1);
 });
@@ -71,7 +71,7 @@ test('displayMenu: multi-line hint splits on newline', () => {
     m.setOptions(['A']);
     m.selectedIndex = 0;
     const cb = () => 'Line one\nLine two\nLine three';
-    const logs = captureScreen(() => m.displayMenu(false, null, cb));
+    const logs = captureScreen(() => m.displayMenu(null, cb));
     assert.ok(logs.some(l => l.includes('Line one')));
     assert.ok(logs.some(l => l.includes('Line two')));
     assert.ok(logs.some(l => l.includes('Line three')));
@@ -82,7 +82,7 @@ test('displayMenu: hint truncated to 4 lines max', () => {
     m.setOptions(['A']);
     m.selectedIndex = 0;
     const cb = () => 'L1\nL2\nL3\nL4\nL5 should not appear';
-    const logs = captureScreen(() => m.displayMenu(false, null, cb));
+    const logs = captureScreen(() => m.displayMenu(null, cb));
     assert.ok(!logs.some(l => l.includes('L5 should not appear')));
     assert.ok(logs.some(l => l.includes('L4')));
 });
@@ -92,7 +92,7 @@ test('displayMenu: empty lines in hint preserved as separators', () => {
     m.setOptions(['A']);
     m.selectedIndex = 0;
     const cb = () => 'Header\n\nDetail line';
-    const logs = captureScreen(() => m.displayMenu(false, null, cb));
+    const logs = captureScreen(() => m.displayMenu(null, cb));
     assert.ok(logs.some(l => l.includes('Header')));
     assert.ok(logs.some(l => l.includes('Detail line')));
 });
@@ -103,7 +103,7 @@ test('displayMenu: CJK option gets correct background width', () => {
     const m = new Menu();
     m.setOptions(['\u8bed\u8a00\u8bbe\u7f6e', 'English']);
     m.selectedIndex = 0;
-    const logs = captureScreen(() => m.displayMenu(false, null, null));
+    const logs = captureScreen(() => m.displayMenu(null, null));
     const selectedLine = logs.find(l => l.includes('\u8bed\u8a00\u8bbe\u7f6e') && l.includes('\x1b[48;5;214m'));
     assert.ok(selectedLine, 'CJK option should have amber background');
 });
@@ -111,7 +111,7 @@ test('displayMenu: CJK option gets correct background width', () => {
 test('displayMenu: backward compat - works without hintCallback', () => {
     const m = new Menu();
     m.setOptions(['Option A']);
-    const logs = captureScreen(() => m.displayMenu(false, null));
+    const logs = captureScreen(() => m.displayMenu(null));
     assert.ok(logs.length > 0);
 });
 
@@ -155,7 +155,7 @@ const allAsync = Promise.resolve()
     const origWrite = process.stdout.write;
     process.stdout.write = (data, ...rest) => { initialWrites.push(data.toString()); };
 
-    const navPromise = m.navigate(false, null, cb);
+    const navPromise = m.navigate(null, cb);
 
     process.stdout.write = origWrite;
 
@@ -183,7 +183,7 @@ const allAsync = Promise.resolve()
     const origWrite = process.stdout.write;
     process.stdout.write = () => {};
 
-    const navPromise = m.navigate(false, null, cb);
+    const navPromise = m.navigate(null, cb);
 
     let downWrites = [];
     process.stdout.write = (data, ...rest) => { downWrites.push(data.toString()); };
