@@ -156,6 +156,49 @@ test('config missing defaults to DISABLE_TELEMETRY=1', () => {
         'DISABLE_TELEMETRY should default to 1 when config is missing');
 });
 
+// ─── handleLaunchFailure rollbackFn tests ───
+
+const { handleLaunchFailure } = require('../lib/launcher');
+
+test('handleLaunchFailure calls rollbackFn with error message', () => {
+    let rollbackCalledWith = null;
+    const rollbackFn = (msg) => { rollbackCalledWith = msg; };
+
+    suppressConsole();
+    try {
+        handleLaunchFailure('test error', { rollbackFn });
+    } finally {
+        restoreConsole();
+    }
+
+    assert.strictEqual(rollbackCalledWith, 'test error',
+        'rollbackFn should be called with the error message');
+});
+
+test('handleLaunchFailure works without rollbackFn', () => {
+    // Should not throw when rollbackFn is not provided
+    suppressConsole();
+    try {
+        handleLaunchFailure('test error without rollback');
+    } finally {
+        restoreConsole();
+    }
+    // If we reach here, it didn't throw
+    assert.ok(true, 'handleLaunchFailure should not throw without rollbackFn');
+});
+
+test('handleLaunchFailure tolerates rollbackFn that throws', () => {
+    const throwingFn = () => { throw new Error('rollback error'); };
+
+    suppressConsole();
+    try {
+        handleLaunchFailure('test error', { rollbackFn: throwingFn });
+    } finally {
+        restoreConsole();
+    }
+    assert.ok(true, 'handleLaunchFailure should catch rollbackFn errors');
+});
+
 // ─── Cleanup ───
 
 Module.prototype.require = originalRequire;
