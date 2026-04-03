@@ -25,7 +25,7 @@ function forceStdinCleanup() {
     } catch (error) {
         // Ignore cleanup errors but log for debugging
         if (process.env.DEBUG_STDIN) {
-            console.error('[DEBUG] forceStdinCleanup error:', error.message);
+            screen.debug('[DEBUG] forceStdinCleanup error: ' + error.message);
         }
     }
 }
@@ -55,6 +55,7 @@ const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
 const { editApi } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
+const screen = require('./lib/ui/screen');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -1047,8 +1048,9 @@ async function executeSelection(selectedIndex) {
             return await showVersionUpdateCheck();
 
         case 8: // Exit
-            console.log('');
-            console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
+            screen.write('\n');
+            screen.write(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset + '\n');
+            screen.exit();
             process.exit(0);
             break;
 
@@ -1355,8 +1357,9 @@ async function showMenu() {
     const selection = await globalMainMenu.navigate(false, displayInfo || null, hintCallback);
 
     if (selection === -1) {
-        console.log('');
-        console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
+        screen.write('\n');
+        screen.write(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset + '\n');
+        screen.exit();
         process.exit(0);
     } else {
         await executeSelection(selection);
@@ -1709,8 +1712,9 @@ async function showVersionUpdateCheck() {
  * Graceful shutdown handlers
  */
 process.on('SIGTERM', () => {
-    console.log('');
-    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
+    screen.write('\n');
+    screen.write(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset + '\n');
+    screen.exit();
     process.exit(0);
 });
 
@@ -1723,43 +1727,34 @@ const stdinManager = require('./lib/utils/stdin-manager');
 let exiting = false;
 
 process.on('SIGINT', () => {
-    // During Claude run, ignore in launcher so child handles it
-    // Check this BEFORE setting exiting flag to avoid breaking reentrancy protection
     if (stdinManager.isSuspended && stdinManager.isSuspended()) {
         return;
     }
-
-    // Prevent re-entrance - ensure cleanup runs only once
-    if (exiting) {
-        return;
-    }
+    if (exiting) return;
     exiting = true;
-
-    // Try to reset stdin state before handling
     try {
         if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
             process.stdin.pause();
         }
-    } catch (_) {
-        // Ignore errors during emergency cleanup
-    }
-
-    // Use unified Ctrl+C handler from StdinManager (synchronous)
+    } catch (_) {}
     try {
-        stdinManager.handleCtrlC();
-    } catch (_) {
-        // Ignore errors during Ctrl+C handling
-    }
-
-    // Exit with standard SIGINT exit code (128 + 2 = 130)
-    // Note: If handleCtrlC() calls process.exit(0) for second Ctrl+C,
-    // this line won't be reached, which is expected behavior
+        const shouldExit = stdinManager.handleCtrlC();
+        if (shouldExit === false) {
+            exiting = false;
+            return;
+        }
+    } catch (_) {}
+    screen.exit();
     process.exit(130);
 });
+
+process.on('uncaughtException', (err) => { screen.exit(); console.error(err); process.exit(1); });
+process.on('unhandledRejection', (err) => { screen.exit(); console.error(err); process.exit(1); });
 
 // Initialize global menus and start the application
 initializeGlobalMenus();
 
 // Start the application
+screen.enter();
 showMenu();
