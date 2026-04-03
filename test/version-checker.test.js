@@ -82,7 +82,7 @@ test('loadConfigSync: returns full defaults when file missing', () => {
     assert.strictEqual(config.showModelUpgradeNotification, true);
     assert.strictEqual(config.apiLaunchMode, 'direct');
     assert.strictEqual(config.autoModelUpgrade, false);
-    assert.strictEqual(config.language, 'zh');
+    assert.strictEqual(config.language, 'en');
 });
 
 // ─── notification_hint menu path verification ───
