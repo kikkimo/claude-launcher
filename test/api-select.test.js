@@ -169,5 +169,20 @@ test('showApiSelectMenu function exists and contains required patterns', () => {
         'showApiSelectMenu should return showMenu()');
 });
 
+// ─── i18n key verification ───
+
+test('navigation.action.edit key exists in en locale', () => {
+    const en = require('../lib/i18n/locales/en');
+    assert.ok(en.navigation.action.edit);
+    assert.ok(en.navigation.action.remove);
+    assert.ok(en.navigation.action.switch);
+    assert.ok(en.navigation.action.select);
+});
+
+test('navigation.use_arrows_esc does not contain "main menu"', () => {
+    const en = require('../lib/i18n/locales/en');
+    assert.ok(!en.navigation.use_arrows_esc.includes('main menu'));
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
