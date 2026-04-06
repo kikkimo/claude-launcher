@@ -13,13 +13,16 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 
 ### 🎨 **Beautiful Interface**
 - Claude-style interface with authentic orange/amber color scheme
+- ANSI alternate screen buffer for drift-free rendering (like vim/htop)
 - Arrow key navigation with smooth menu transitions
+- Paginated API tables with ←→ page navigation for large API lists
 - Interactive tables for API selection and management
 - Multi-language support (English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian, Portuguese, Japanese, Korean, Russian)
 
 ### 🔐 **Advanced Security**
 - AES-256-CBC encryption for all sensitive data
 - Machine-specific encryption keys for enhanced security
+- Unified password guard for high-risk operations (edit, delete, import, export)
 - Password-protected configuration import/export
 - Secure API token storage with masked display
 - Strong password requirements and validation
@@ -27,10 +30,12 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 ### 🚀 **Third-party API Management**
 - Full support for multiple third-party API providers (Anthropic, DeepSeek, Kimi K2.5, MiniMax M2.7, GLM-5.1/ZhiPu AI, and custom APIs)
 - Interactive API configuration with validation
+- **Edit API**: Modify name, provider, base URL, and model for existing APIs
 - API usage statistics with success/failure tracking
 - Model upgrade notifications and auto-upgrade support
 - Secure configuration backup and restore
 - Easy API switching, removal, and bulk clear
+- Maximum 99 APIs supported per configuration
 
 ### 🌍 **Enterprise-grade Features**
 - Global installation - use `claude-launcher` from anywhere
@@ -88,20 +93,21 @@ node claude-launcher
 4. **Launch Claude Code with Third-party API** - Use configured third-party API
 5. **Launch Claude Code with Third-party API (Skip Permissions)** - Combine third-party API with permission skipping
 6. **Third-party API Management** - Full API lifecycle management:
-   - Add, switch, and remove APIs
+   - Add, edit, switch, and remove APIs
    - View usage statistics with success/failure rates
    - Model upgrade settings (auto/manual upgrade)
-   - Import/export configurations
-7. **Language Settings** - Switch between 11 supported languages
+   - Import/export configurations (password-protected)
+7. **Configuration Management** - Language, telemetry, launch mode, model upgrade settings
 8. **Version Update Check** - Check for launcher updates
 9. **Exit** - Close the launcher
 
 ### Interactive Navigation
 
-- **Arrow Keys**: Use ↑↓ to navigate, Enter to select
-- **Escape Key**: Press Esc to go back or exit
+- **Arrow Keys**: Use ↑↓ to navigate, ←→ to switch pages (in paginated tables), Enter to select
+- **Escape Key**: Press Esc to go back or cancel
+- **Ctrl+C**: First press shows warning, second press exits cleanly
 - **Multi-language**: All interface text adapts to your selected language
-- **Smart Tables**: Interactive tables for API management with clear visual feedback
+- **Smart Tables**: Paginated interactive tables for API management with per-page selection memory
 
 ### Example Session
 
@@ -120,7 +126,7 @@ $ claude-launcher
     Launch Claude Code with Third-party API
     Launch Claude Code with Third-party API (Skip Permissions)
     Third-party API Management
-    Language Settings
+    Configuration Management
     Version Update Check
     Exit
 ```
@@ -133,12 +139,13 @@ Access comprehensive API management through the dedicated menu:
 📋 Third-party API Management
 
   → Add New API
+    Edit API            → Select API → Edit name/provider/URL/model
     Remove API          → Delete Single API / Clear All APIs
     Switch Active API
     View Statistics     → View Details / Reset Statistics
     Model Upgrade       → Auto Upgrade [ON/OFF] / Manual Upgrade
-    Export Configuration
-    Import Configuration
+    Export Configuration  🔒 (password required)
+    Import Configuration  🔒 (password required)
     Change Password
     Back to Main Menu
 ```
@@ -154,7 +161,7 @@ The launcher automatically checks for model upgrades when you start:
 
 ### Modern Configuration System
 
-Claude Launcher 2.0 uses an advanced configuration system:
+Claude Launcher uses an advanced configuration system:
 
 1. **Encrypted JSON Storage**: Configuration stored at `~/.claude-launcher-apis.json`
 2. **Interactive Setup**: First-time wizard guides you through all options

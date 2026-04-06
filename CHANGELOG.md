@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-04-07
+
+### Added
+- **ANSI Screen Rendering Layer**: Full terminal rendering rewrite using alternate screen buffer (`\x1b[?1049h`) and absolute cursor positioning (`\x1b[H\x1b[2J`). Eliminates all position drift across page transitions. Program runs in isolated screen like vim/htop; exit restores original terminal content.
+  - New `lib/ui/screen.js` singleton: `render()`, `write()`, `enter()`, `exit()`, `exitForHandoff()`, `debug()`, `showCursor()`/`hideCursor()`, `setReadlineActive()`, `isActive()`
+  - Test mode (`SCREEN_TEST=1`): source-tagged write interception for automated leak detection
+  - Degradation: non-TTY passthrough, `SCREEN_NO_ALT=1` manual override
+- **Edit API Feature**: New menu item to modify API name, provider, base URL, and model (API key not editable)
+  - Field-by-field editing with per-field validation (reuses Add API validators)
+  - Provider selection via preset list (not free text), preserves provider-specific envVars/timeout/upgrade detection
+  - Provider/URL mismatch warning in field menu hint area
+  - Auto-save per field edit with success/cancel feedback
+- **Unified Password Guard**: Shared `passwordGuard()` function protects delete, edit, import, export operations
+  - Mode A (delete/edit): guard at dispatch layer with header display
+  - Mode B (export/import): guard inside handler after title page
+  - Handles wrong password, empty password, Esc cancel, Ctrl+C delegation distinctly
+  - Defense-in-depth: export/import return false when no password set
+- **API Table Pagination**: ←→ page navigation for API selection tables (remove/switch/edit)
+  - Dynamic items-per-page based on terminal height
+  - Per-page selection memory across page switches
+  - 3 pure testable helpers: `calculatePagination()`, `initPaginationState()`, `handlePageKeyPress()`
+  - Legacy >99 API defensive guard with display truncation + warning
+- **API Count Limit**: Maximum 99 APIs enforced in `addApi()` and import path
+- **Launch Handoff Lifecycle**: Clean `screen.exitForHandoff()` → normal terminal output → `relinquishConsoleToChild()` → spawn sequence
+  - `handleLaunchFailure()` promoted to module-level with `rollbackFn(errorMessage)` callback chain
+  - Pre-handoff errors show in alt-screen; post-handoff errors use press-key + 60s timeout + exit
+- **Menu Hint Enhancements**: Password-required hints (🔒) for edit/remove/export/import when password is set
+- **Navigation i18n**: Action words (edit/remove/switch/select) fully localized across 11 locales
+
+### Changed
+- **All Terminal Output**: 462 direct `console.clear/log/error/warn` and `process.stdout.write` calls replaced with `screen.render()`/`screen.write()`/`screen.debug()` across 12 files
+- **Menu Component**: `displayMenu()` and `navigate()` now use `screen.render()` for absolute positioning; `clearScreen` parameter removed from `navigate()` signature
+- **Interactive Table**: Refactored to `screen.render()` with pagination support; action text localized via i18n keys
+- **Signal Ownership**: Global SIGINT handler respects `handleCtrlC()` return value (first Ctrl+C = warning only); SIGTERM/uncaughtException/unhandledRejection handlers call `screen.exit()` before exit
+- **Launcher Lifecycle**: `relinquishConsoleToChild()` moved before `spawn()` for clean handoff; `updateApiModel()` delegates to `updateApiField()` for unified validation
+- **Default Config Language**: Changed from `zh` to `en` in `loadConfig()`/`loadConfigSync()` to match `LanguageManager` default; config file written on first run
+- **Hint Area Spacing**: Extra space after ℹ icon; multi-line hint indentation aligned
+
+### Fixed
+- **First-run Language Bug**: Deleting config and restarting no longer switches from English to Chinese on second launch
+- **Field Menu CJK Alignment**: Label padding uses `getStringWidth()`/`padStringToWidth()` for correct CJK character width
+
 ## [2.5.0] - 2026-03-31
 
 ### Added

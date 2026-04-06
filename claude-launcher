@@ -25,7 +25,7 @@ function forceStdinCleanup() {
     } catch (error) {
         // Ignore cleanup errors but log for debugging
         if (process.env.DEBUG_STDIN) {
-            console.error('[DEBUG] forceStdinCleanup error:', error.message);
+            screen.debug('[DEBUG] forceStdinCleanup error: ' + error.message);
         }
     }
 }
@@ -50,10 +50,12 @@ const {
     launchClaudeWithApi
 } = require('./lib/launcher');
 const { getPasswordInput } = require('./lib/auth/password-input');
-const { verifyExportPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
+const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
+const { editApi } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
+const screen = require('./lib/ui/screen');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -66,6 +68,7 @@ const apiManager = new ApiManager();
 let globalMainMenu = null;
 let globalConfirmMenu = null;
 let globalApiManagementMenu = null;
+let globalConfigMenu = null;
 
 /**
  * Initialize global menu objects to prevent recreation and screen flickering
@@ -79,6 +82,9 @@ function initializeGlobalMenus() {
     }
     if (!globalApiManagementMenu) {
         globalApiManagementMenu = new Menu();
+    }
+    if (!globalConfigMenu) {
+        globalConfigMenu = new Menu();
     }
 }
 
@@ -132,7 +138,7 @@ function openFileWithDefault(filePath) {
 
     exec(command, (error) => {
         if (error) {
-            console.log(colors.yellow + `Could not open file automatically: ${error.message}` + colors.reset);
+            screen.write(colors.yellow + `Could not open file automatically: ${error.message}` + colors.reset + '\n');
         }
     });
 }
@@ -253,7 +259,7 @@ async function addNewThirdPartyApi() {
         const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
         if (error.message === cancelledMessage) {
             // User cancelled - show neutral message instead of error
-            console.log(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset);
+            screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
         } else {
             // Actual error occurred
             showError(await i18n.t('errors.api.failed_add', error.message));
@@ -267,18 +273,21 @@ async function addNewThirdPartyApi() {
  * Remove third-party API menu with submenu
  */
 async function removeThirdPartyApi() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '🗑️  ' + await i18n.t('menu.remove_api.title') + colors.reset);
-    console.log('');
-
     const apis = apiManager.getApis();
+
+    const lines = [
+        '',
+        colors.bright + colors.orange + '🗑️  ' + await i18n.t('menu.remove_api.title') + colors.reset,
+        '',
+    ];
 
     // Show current API count
     if (apis.length > 0) {
-        console.log(colors.cyan + '  ' + await i18n.t('messages.info.current_api_count', apis.length) + colors.reset);
-        console.log('');
+        lines.push(colors.cyan + '  ' + await i18n.t('messages.info.current_api_count', apis.length) + colors.reset);
+        lines.push('');
     }
+
+    screen.render(lines);
 
     const menuOptions = [
         await i18n.t('menu.remove_api.delete_single'),
@@ -337,7 +346,6 @@ async function deleteSingleApi() {
                 const selectedIndex = apis.findIndex(api => api.id === selectedApi.id);
                 apiManager.removeApi(selectedIndex);
 
-                console.clear();
                 showSuccess(await i18n.t('messages.success.api_removed'), [
                     `${await i18n.t('api.actions.removed_info', selectedApi.name)}`,
                     `${await i18n.t('api.details.provider')}: ${selectedApi.provider}`
@@ -376,24 +384,23 @@ async function clearAllApis() {
     const count = apis.length;
 
     if (count === 0) {
-        console.clear();
         showInfo(await i18n.t('messages.info.no_apis'));
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
         return;
     }
 
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.red + '⚠️  ' + await i18n.t('menu.remove_api.clear_all') + colors.reset);
-    console.log('');
-    console.log(colors.yellow + '  ' + await i18n.t('messages.prompts.confirm_clear_all', count) + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.red + '⚠️  ' + await i18n.t('menu.remove_api.clear_all') + colors.reset,
+        '',
+        colors.yellow + '  ' + await i18n.t('messages.prompts.confirm_clear_all', count) + colors.reset,
+        '',
+    ]);
 
     const input = await simpleInput(colors.cyan + '  ' + await i18n.t('messages.prompts.confirm_clear_all_input') + colors.reset);
 
     if (input === 'CLEAR') {
         const clearedCount = apiManager.clearAllApis();
-        console.clear();
         showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
     } else {
@@ -455,10 +462,11 @@ function formatRelativeTime(timestamp) {
 }
 
 async function viewStatistics() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset,
+        '',
+    ]);
 
     const menuOptions = [
         await i18n.t('statistics.menu_view'),
@@ -480,7 +488,7 @@ async function viewStatistics() {
             const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
             if (confirm.toLowerCase() === 'y') {
                 apiManager.resetStatistics();
-                console.log(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset);
+                screen.write(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset + '\n');
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
             }
             return viewStatistics();
@@ -498,38 +506,38 @@ async function viewStatistics() {
 async function showStatisticsDetails() {
     const { padStringToWidth } = require('./lib/utils/string-width');
 
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset);
-    console.log('');
-
     const stats = apiManager.getEnhancedStatistics();
 
-    // Summary section
-    console.log(colors.cyan + '  ' + i18n.tSync('ui.general.summary') + ':' + colors.reset);
-    console.log(colors.gray + `    ${await i18n.t('statistics.total_apis', stats.totalApis)}` + colors.reset);
-    console.log(colors.gray + `    ${await i18n.t('statistics.active_api', stats.activeApiName)}` + colors.reset);
-    console.log(colors.gray + `    ${await i18n.t('statistics.most_used', stats.mostUsedApi)}` + colors.reset);
-    console.log(colors.gray + `    ${await i18n.t('statistics.total_usage', stats.totalUsage)}` + colors.reset);
-    console.log(colors.gray + `    ${await i18n.t('statistics.success_rate', stats.successRate)}` + colors.reset);
-    console.log('');
+    const lines = [
+        '',
+        colors.bright + colors.orange + '📊 ' + await i18n.t('statistics.title') + colors.reset,
+        '',
+        // Summary section
+        colors.cyan + '  ' + i18n.tSync('ui.general.summary') + ':' + colors.reset,
+        colors.gray + `    ${await i18n.t('statistics.total_apis', stats.totalApis)}` + colors.reset,
+        colors.gray + `    ${await i18n.t('statistics.active_api', stats.activeApiName)}` + colors.reset,
+        colors.gray + `    ${await i18n.t('statistics.most_used', stats.mostUsedApi)}` + colors.reset,
+        colors.gray + `    ${await i18n.t('statistics.total_usage', stats.totalUsage)}` + colors.reset,
+        colors.gray + `    ${await i18n.t('statistics.success_rate', stats.successRate)}` + colors.reset,
+        '',
+    ];
 
     if (stats.apiStats.length > 0) {
-        console.log(colors.cyan + '  ' + i18n.tSync('ui.general.configured_apis') + ':' + colors.reset);
-        console.log('');
+        lines.push(colors.cyan + '  ' + i18n.tSync('ui.general.configured_apis') + ':' + colors.reset);
+        lines.push('');
 
         // Table header
-        console.log(colors.dim + '    ' +
+        lines.push(colors.dim + '    ' +
             padStringToWidth(await i18n.t('statistics.header_name'), 20) +
             padStringToWidth(await i18n.t('statistics.header_usage'), 10) +
             padStringToWidth(await i18n.t('statistics.header_success'), 10) +
             await i18n.t('statistics.header_last_used') +
             colors.reset);
-        console.log(colors.dim + '    ' + '─'.repeat(60) + colors.reset);
+        lines.push(colors.dim + '    ' + '─'.repeat(60) + colors.reset);
 
         for (const api of stats.apiStats) {
             const lastUsedText = formatRelativeTime(api.lastUsed);
-            console.log(colors.gray + '    ' +
+            lines.push(colors.gray + '    ' +
                 padStringToWidth(api.name, 20) +
                 padStringToWidth(String(api.usageCount), 10) +
                 padStringToWidth(api.successRate, 10) +
@@ -537,10 +545,11 @@ async function showStatisticsDetails() {
                 colors.reset);
         }
     } else {
-        console.log(colors.gray + '  ' + await i18n.t('statistics.no_usage') + colors.reset);
+        lines.push(colors.gray + '  ' + await i18n.t('statistics.no_usage') + colors.reset);
     }
 
-    console.log('');
+    lines.push('');
+    screen.render(lines);
     await waitForKey(await i18n.t('messages.prompts.press_any_key'));
 }
 
@@ -551,36 +560,36 @@ async function showStatisticsDetails() {
 async function handleFirstTimePasswordSetup() {
     while (true) {
         // Clear screen and show header
-        console.clear();
-        console.log('');
-        console.log(colors.bright + colors.yellow + '🔐 ' + i18n.tSync('password.setup.first_time_title') + colors.reset);
-        console.log('');
-
-        // Show information
-        console.log(colors.cyan + i18n.tSync('password.setup.why_needed') + colors.reset);
+        const lines = [
+            '',
+            colors.bright + colors.yellow + '🔐 ' + i18n.tSync('password.setup.first_time_title') + colors.reset,
+            '',
+            // Show information
+            colors.cyan + i18n.tSync('password.setup.why_needed') + colors.reset,
+        ];
         const whyNeededItems = i18n.tSync('password.setup.why_needed_items');
         if (Array.isArray(whyNeededItems)) {
             whyNeededItems.forEach(item => {
-                console.log(colors.gray + '• ' + item + colors.reset);
+                lines.push(colors.gray + '• ' + item + colors.reset);
             });
         }
-        console.log('');
-        console.log(colors.cyan + '🔒 ' + i18n.tSync('password.setup.new_security_title') + colors.reset);
+        lines.push('');
+        lines.push(colors.cyan + '🔒 ' + i18n.tSync('password.setup.new_security_title') + colors.reset);
         const securityItems = i18n.tSync('password.setup.security_items');
         if (Array.isArray(securityItems)) {
             securityItems.forEach(item => {
-                console.log(colors.gray + '• ' + item + colors.reset);
+                lines.push(colors.gray + '• ' + item + colors.reset);
             });
         }
-        console.log('');
-        console.log(colors.yellow + i18n.tSync('password.setup.options_title') + colors.reset);
-        console.log(colors.gray + '• ' + i18n.tSync('password.setup.option_set') + colors.reset);
-        console.log(colors.gray + '• ' + i18n.tSync('password.setup.option_skip') + colors.reset);
-        console.log('');
-        console.log(colors.red + i18n.tSync('password.setup.warning_skip') + colors.reset);
-        console.log('');
-
-        console.log(colors.gray + '按任意键继续...' + colors.reset);
+        lines.push('');
+        lines.push(colors.yellow + i18n.tSync('password.setup.options_title') + colors.reset);
+        lines.push(colors.gray + '• ' + i18n.tSync('password.setup.option_set') + colors.reset);
+        lines.push(colors.gray + '• ' + i18n.tSync('password.setup.option_skip') + colors.reset);
+        lines.push('');
+        lines.push(colors.red + i18n.tSync('password.setup.warning_skip') + colors.reset);
+        lines.push('');
+        lines.push(colors.gray + '按任意键继续...' + colors.reset);
+        screen.render(lines);
 
         // Wait for user to read the information
         await new Promise((resolve) => {
@@ -656,14 +665,16 @@ async function promptForPasswordSetup() {
  * Confirm skip password setup
  */
 async function confirmSkipPassword() {
-    console.log('');
-    console.log(colors.bright + colors.red + '⚠️  ' + i18n.tSync('errors.password.confirm_skip_title') + colors.reset);
-    console.log('');
-    console.log(colors.gray + i18n.tSync('ui.general.after_skipping_password_setup') + colors.reset);
-    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[0] + colors.reset);
-    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[1] + colors.reset);
-    console.log(colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[2] + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.red + '⚠️  ' + i18n.tSync('errors.password.confirm_skip_title') + colors.reset,
+        '',
+        colors.gray + i18n.tSync('ui.general.after_skipping_password_setup') + colors.reset,
+        colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[0] + colors.reset,
+        colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[1] + colors.reset,
+        colors.gray + '• ' + i18n.tSync('ui.general.password_skip_consequences')[2] + colors.reset,
+        '',
+    ]);
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
@@ -678,12 +689,12 @@ async function confirmSkipPassword() {
     if (choice === 0) {
         try {
             apiManager.skipPasswordSetup();
-            console.log(colors.yellow + i18n.tSync('errors.password.setup_skipped') + colors.reset);
+            screen.write(colors.yellow + i18n.tSync('errors.password.setup_skipped') + colors.reset + '\n');
             await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return true;
         } catch (error) {
             forceStdinCleanup();
-            console.log(colors.red + `Operation failed: ${error.message}` + colors.reset);
+            screen.write(colors.red + `Operation failed: ${error.message}` + colors.reset + '\n');
             await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
             return false;
         }
@@ -699,145 +710,112 @@ async function showApiManagementMenu() {
     // Force cleanup stdin state before showing API management menu
     forceStdinCleanup();
 
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '📋 ' + await i18n.t('menu.api_management.title') + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '📋 ' + await i18n.t('menu.api_management.title') + colors.reset,
+        '',
+    ]);
 
     // Check if this is first time usage and prompt for password setup
     if (apiManager.isFirstTimeUsage()) {
         const passwordChoice = await handleFirstTimePasswordSetup();
         if (!passwordChoice) {
-            // User chose to skip or canceled, return to main menu
             return showMenu();
         }
     }
 
     // Build menu options based on password setup status
     const menuOptions = [
-        await i18n.t('menu.api_management.add_new'),      // 0
-        await i18n.t('menu.api_management.remove'),       // 1
-        await i18n.t('menu.api_management.switch'),       // 2
-        await i18n.t('menu.api_management.statistics')    // 3
+        await i18n.t('menu.api_management.add_new'),       // 0
+        await i18n.t('menu.api_management.edit'),           // 1
+        await i18n.t('menu.api_management.remove'),         // 2
+        await i18n.t('menu.api_management.switch'),         // 3
+        await i18n.t('menu.api_management.statistics'),     // 4
+        await i18n.t('menu.api_management.manual_upgrade')  // 5
     ];
 
     // Add import/export options only if password is set
     if (apiManager.canUseImportExport()) {
-        menuOptions.push(await i18n.t('menu.api_management.export'));          // 4
-        menuOptions.push(await i18n.t('menu.api_management.import'));          // 5
-        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 6
+        menuOptions.push(await i18n.t('menu.api_management.export'));          // 6
+        menuOptions.push(await i18n.t('menu.api_management.import'));          // 7
+        menuOptions.push(await i18n.t('menu.api_management.change_password')); // 8
     }
 
-    // Add model upgrade settings (always available)
-    menuOptions.push(await i18n.t('model_upgrade.settings_title'));  // 4 or 7 (depending on import/export)
-
-    menuOptions.push(await i18n.t('menu.api_management.back'));      // 5 or 8
+    menuOptions.push(await i18n.t('menu.api_management.back'));      // last
 
     // Ensure global menus are initialized
     initializeGlobalMenus();
 
     globalApiManagementMenu.setOptions(menuOptions);
 
-    const choice = await globalApiManagementMenu.navigate();
+    const hintCallback = (index) => {
+        if (!apiManager.hasExportPassword()) return null;
+        const passwordHints = {};
+        passwordHints[1] = i18n.tSync('hints.edit_password_required');
+        passwordHints[2] = i18n.tSync('hints.remove_password_required');
+        if (apiManager.canUseImportExport()) {
+            passwordHints[6] = i18n.tSync('hints.export_password_required');
+            passwordHints[7] = i18n.tSync('hints.import_password_required');
+        }
+        return passwordHints[index] || null;
+    };
+
+    const choice = await globalApiManagementMenu.navigate(null, hintCallback);
 
     // Handle menu choices based on current menu options
     if (choice === 0) { // Add New API
         await addNewThirdPartyApi();
         return showMenu();
-    } else if (choice === 1) { // Remove API
-        await removeThirdPartyApi();
-        return showMenu();
-    } else if (choice === 2) { // Switch Active API
+    }
+
+    if (choice === 1) { // Edit API
+        if (await passwordGuard(apiManager, 'edit')) {
+            await editApi(apiManager);
+        }
+        return showApiManagementMenu();
+    }
+
+    if (choice === 2) { // Remove API
+        if (await passwordGuard(apiManager, 'delete')) {
+            await removeThirdPartyApi();
+        }
+        return showApiManagementMenu();
+    }
+
+    if (choice === 3) { // Switch Active API
         await switchThirdPartyApi();
         return showMenu();
-    } else if (choice === 3) { // View API Statistics
+    }
+
+    if (choice === 4) { // View API Statistics
         await viewStatistics();
         return showMenu();
-    } else if (apiManager.canUseImportExport()) {
-        // With import/export enabled: indices 4-8
-        if (choice === 4) { // Export Configuration
+    }
+
+    if (choice === 5) { // Manual Model Upgrade
+        await performManualUpgrade();
+        return showApiManagementMenu();
+    }
+
+    if (apiManager.canUseImportExport()) {
+        if (choice === 6) { // Export Configuration
             await exportConfiguration();
-            return showMenu();
-        } else if (choice === 5) { // Import Configuration
+            return showApiManagementMenu();
+        }
+
+        if (choice === 7) { // Import Configuration
             await importConfiguration();
-            return showMenu();
-        } else if (choice === 6) { // Change Password
+            return showApiManagementMenu();
+        }
+
+        if (choice === 8) { // Change Password
             await changePassword();
             return showMenu();
-        } else if (choice === 7) { // Model Upgrade Settings (NEW)
-            return await showModelUpgradeSettings();
-        } else if (choice === 8) { // Back to Main Menu
-            return showMenu();
-        }
-    } else {
-        // Without import/export: indices 4-5
-        if (choice === 4) { // Model Upgrade Settings (NEW)
-            return await showModelUpgradeSettings();
-        } else if (choice === 5) { // Back to Main Menu
-            return showMenu();
         }
     }
 
-    // Default fallback to main menu
+    // Back to Main Menu (last item) or default fallback
     return showMenu();
-}
-
-/**
- * Show model upgrade settings menu
- */
-async function showModelUpgradeSettings() {
-    const versionChecker = require('./lib/utils/version-checker');
-    const upgradeChecker = require('./lib/utils/model-upgrade-checker');
-
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '⚙️  ' + await i18n.t('model_upgrade.settings_title') + colors.reset);
-    console.log('');
-
-    const config = await versionChecker.loadConfig();
-    const isAutoOn = config.autoModelUpgrade === true;
-
-    console.log(colors.cyan + '  ' + await i18n.t('model_upgrade.current_config') + ':' + colors.reset);
-    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
-        (isAutoOn
-            ? colors.green + await i18n.t('model_upgrade.auto_upgrade_on')
-            : colors.dim + await i18n.t('model_upgrade.auto_upgrade_off')
-        ) + colors.reset);
-    console.log('');
-
-    const menuOptions = [
-        isAutoOn
-            ? await i18n.t('model_upgrade.menu_toggle_auto_on')
-            : await i18n.t('model_upgrade.menu_toggle_auto_off'),
-        await i18n.t('model_upgrade.menu_manual_upgrade'),
-        await i18n.t('model_upgrade.menu_back')
-    ];
-
-    initializeGlobalMenus();
-    globalApiManagementMenu.setOptions(menuOptions);
-    const choice = await globalApiManagementMenu.navigate();
-
-    switch (choice) {
-        case 0: // Toggle auto upgrade
-            await versionChecker.setAutoModelUpgrade(!isAutoOn);
-            console.log('');
-            console.log(colors.green + '✓ ' + await i18n.t('model_upgrade.auto_upgrade_label') + ': ' +
-                (!isAutoOn
-                    ? await i18n.t('model_upgrade.auto_upgrade_on')
-                    : await i18n.t('model_upgrade.auto_upgrade_off')
-                ) + colors.reset);
-            await waitForKey(await i18n.t('messages.prompts.press_any_key'));
-            return showModelUpgradeSettings();
-
-        case 1: // Manual upgrade
-            await performManualUpgrade();
-            return showModelUpgradeSettings();
-
-        case 2: // Back
-        case -1:
-        default:
-            return showApiManagementMenu();
-    }
 }
 
 /**
@@ -847,21 +825,26 @@ async function performManualUpgrade() {
     const { getLatestModel, getProvider } = require('./lib/presets/providers');
     const { simpleInput } = require('./lib/ui/prompts');
 
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '🔄 ' + await i18n.t('model_upgrade.manual_title') + colors.reset);
-    console.log('');
-
     const apis = apiManager.getApis();
 
     if (apis.length === 0) {
-        console.log(colors.yellow + '  ' + await i18n.t('messages.info.no_apis') + colors.reset);
+        screen.render([
+            '',
+            colors.bright + colors.orange + '🔄 ' + await i18n.t('model_upgrade.manual_title') + colors.reset,
+            '',
+            colors.yellow + '  ' + await i18n.t('messages.info.no_apis') + colors.reset,
+        ]);
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
         return;
     }
 
-    console.log(colors.gray + '  ' + await i18n.t('model_upgrade.manual_checking', apis.length) + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '🔄 ' + await i18n.t('model_upgrade.manual_title') + colors.reset,
+        '',
+        colors.gray + '  ' + await i18n.t('model_upgrade.manual_checking', apis.length) + colors.reset,
+        '',
+    ]);
 
     let upgradedCount = 0;
     let skippedUpToDate = 0;
@@ -872,87 +855,164 @@ async function performManualUpgrade() {
         const api = apis[i];
         const latestModel = getLatestModel(api.model, api.provider);
 
-        console.log(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset);
-        console.log(colors.bright + `  ${i + 1}/${apis.length}  ${api.name}` + colors.reset);
-        console.log(colors.gray + '       ' + await i18n.t('model_upgrade.manual_api_current', api.model) + colors.reset);
+        screen.write(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset + '\n');
+        screen.write(colors.bright + `  ${i + 1}/${apis.length}  ${api.name}` + colors.reset + '\n');
+        screen.write(colors.gray + '       ' + await i18n.t('model_upgrade.manual_api_current', api.model) + colors.reset + '\n');
 
         if (latestModel) {
-            console.log(colors.green + '       ' + await i18n.t('model_upgrade.manual_api_latest', latestModel) + colors.reset);
-            console.log('');
+            screen.write(colors.green + '       ' + await i18n.t('model_upgrade.manual_api_latest', latestModel) + colors.reset + '\n');
+            screen.write('\n');
 
             // Ask for confirmation
             const answer = await simpleInput(colors.yellow + '       ' + await i18n.t('model_upgrade.manual_confirm') + ' ' + colors.reset);
 
             if (answer.toLowerCase() === 'y') {
-                apiManager.updateApiModel(api.id, latestModel);
-                console.log(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset);
-                upgradedCount++;
+                try {
+                    apiManager.updateApiModel(api.id, latestModel);
+                    screen.write(colors.green + '       ✓ ' + await i18n.t('model_upgrade.manual_upgraded', api.model, latestModel) + colors.reset + '\n');
+                    upgradedCount++;
+                } catch (error) {
+                    screen.write(colors.yellow + '       ⚠️ Skipped: ' + error.message + colors.reset + '\n');
+                    skippedByUser++;
+                }
             } else {
-                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_skipped') + colors.reset);
+                screen.write(colors.dim + '       ' + await i18n.t('model_upgrade.manual_skipped') + colors.reset + '\n');
                 skippedByUser++;
             }
         } else {
             // No upgrade info available - check if model exists in provider
             const provider = getProvider(api.provider);
             if (provider && provider.models && provider.models.includes(api.model)) {
-                // Model exists in provider, likely already latest or no alias defined
-                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_uptodate') + colors.reset);
+                screen.write(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_uptodate') + colors.reset + '\n');
                 skippedUpToDate++;
             } else {
-                console.log(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_no_info') + colors.reset);
+                screen.write(colors.dim + '       ' + await i18n.t('model_upgrade.manual_api_no_info') + colors.reset + '\n');
                 skippedNoInfo++;
             }
         }
 
-        console.log('');
+        screen.write('\n');
     }
 
-    console.log(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset);
-    console.log('');
-    console.log(colors.green + '  ' + await i18n.t('model_upgrade.manual_complete') + colors.reset);
-    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_upgraded', upgradedCount) + colors.reset);
-    console.log(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_skipped',
+    screen.write(colors.cyan + '  ─────────────────────────────────────────────────' + colors.reset + '\n');
+    screen.write('\n');
+    screen.write(colors.green + '  ' + await i18n.t('model_upgrade.manual_complete') + colors.reset + '\n');
+    screen.write(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_upgraded', upgradedCount) + colors.reset + '\n');
+    screen.write(colors.gray + '    ' + await i18n.t('model_upgrade.manual_stats_skipped',
         skippedUpToDate + skippedNoInfo + skippedByUser,
         skippedUpToDate,
-        skippedNoInfo) + colors.reset);
-    console.log('');
+        skippedNoInfo) + colors.reset + '\n');
+    screen.write('\n');
 
     await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+}
+
+/**
+ * Show API selection menu for select launch mode
+ */
+async function showApiSelectMenu(skipPermissions = false) {
+    const { padStringToWidth, getStringWidth } = require('./lib/utils/string-width');
+    const { getProvider } = require('./lib/presets/providers');
+
+    const apis = apiManager.getApis();
+
+    if (apis.length === 0) {
+        showInfo(i18n.tSync('hints.no_api_configured'), []);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
+        return showMenu();
+    }
+
+    const activeApi = apiManager.getActiveApi();
+
+    // Build menu items with two-column alignment
+    // Compute max name width (including ● prefix) for consistent column alignment
+    let maxNameWidth = 0;
+    apis.forEach(api => {
+        const w = getStringWidth('● ' + api.name);
+        if (w > maxNameWidth) maxNameWidth = w;
+    });
+
+    const menuItems = apis.map((api) => {
+        const prefix = (activeApi && activeApi.id === api.id) ? '● ' : '  ';
+        const nameCol = prefix + api.name;
+        return padStringToWidth(nameCol, maxNameWidth + 4) + api.model;
+    });
+    menuItems.push(i18n.tSync('menu.api_select.back'));
+
+    // Hint callback for each API item
+    const hintCallback = (selectedIndex) => {
+        if (selectedIndex >= apis.length) return null; // "Back" item
+        const api = apis[selectedIndex];
+        const providerConfig = getProvider(api.provider);
+        const providerName = providerConfig ? providerConfig.name : (api.provider || 'Custom');
+        const lastUsed = formatRelativeTime(api.lastUsed || null);
+        const usageCount = api.usageCount || 0;
+        return i18n.tSync('hints.api_select.info', api.name) + '\n' +
+               i18n.tSync('hints.api_select.detail', providerName, api.model) + '\n' +
+               i18n.tSync('hints.api_select.usage', usageCount, lastUsed);
+    };
+
+    screen.render([
+        '',
+        colors.bright + colors.orange + '🔗 ' + i18n.tSync('menu.api_select.title') + colors.reset,
+        '',
+    ]);
+
+    const selectMenu = new Menu();
+    selectMenu.setOptions(menuItems);
+    const choice = await selectMenu.navigate(null, hintCallback);
+
+    if (choice === -1 || choice === apis.length) {
+        // Back or Esc
+        return showMenu();
+    }
+
+    // User selected an API
+    const selectedApi = apis[choice];
+    apiManager.setActiveApi(choice);
+    apiManager.recordLaunchAttempt();
+    screen.exitForHandoff();
+    launchClaudeWithApi(selectedApi, skipPermissions, {
+        rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
+    });
 }
 
 /**
  * Handle third-party API launch
  */
 async function handleThirdPartyApiLaunch(skipPermissions = false) {
-    try {
-        const activeApi = apiManager.getActiveApi();
+    const { loadConfigSync } = require('./lib/utils/version-checker');
+    const config = loadConfigSync();
 
-        if (!activeApi) {
-            console.clear();
-            showInfo(i18n.tSync('launch.no_active_api'), [
-                i18n.tSync('launch.no_active_api_desc'),
-                i18n.tSync('launch.add_configure_first')
-            ]);
-
-            await waitForKey(i18n.tSync('launch.press_key_return'));
-            return showMenu();
-        }
-
-        // Record successful launch BEFORE launching (since process exits after)
-        apiManager.recordSuccessfulLaunch();
-
-        launchClaudeWithApi(activeApi, skipPermissions);
-
-    } catch (error) {
-        // Record failed launch
-        apiManager.recordFailedLaunch(error.message);
-
-        showError('Failed to launch with third-party API', [error.message]);
-
-        setTimeout(() => {
-            showMenu();
-        }, 2000);
+    if (config.apiLaunchMode === 'select') {
+        return showApiSelectMenu(skipPermissions);
     }
+
+    // Direct mode
+    const apis = apiManager.getApis();
+
+    if (apis.length === 0) {
+        showInfo(i18n.tSync('hints.no_api_configured'), []);
+        await waitForKey(i18n.tSync('messages.prompts.press_any_key'));
+        return showMenu();
+    }
+
+    const activeApi = apiManager.getActiveApi();
+
+    if (activeApi === null) {
+        showInfo(i18n.tSync('launch.no_active_api'), [
+            i18n.tSync('launch.no_active_api_desc'),
+            i18n.tSync('launch.add_configure_first')
+        ]);
+        await waitForKey(i18n.tSync('launch.press_key_return'));
+        return showMenu();
+    }
+
+    apiManager.recordLaunchAttempt();
+    screen.exitForHandoff();
+    launchClaudeWithApi(activeApi, skipPermissions, {
+        rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
+    });
 }
 
 /**
@@ -961,14 +1021,17 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
 async function executeSelection(selectedIndex) {
     switch (selectedIndex) {
         case 0: // Launch Claude Code
+            screen.exitForHandoff();
             launchClaudeDefault();
             break;
 
         case 1: // Launch Claude Code (Skip Permissions)
+            screen.exitForHandoff();
             launchClaudeSkipPermissions();
             break;
 
         case 2: // Launch Claude Code (Enable Auto Mode)
+            screen.exitForHandoff();
             launchClaudeAutoMode();
             break;
 
@@ -983,21 +1046,119 @@ async function executeSelection(selectedIndex) {
         case 5: // 3rd-party API Management
             return await showApiManagementMenu();
 
-        case 6: // Language Settings
-            return await showLanguageSettings();
+        case 6: // Configuration Management
+            return await showConfigManagement();
 
         case 7: // Version Update Check
             return await showVersionUpdateCheck();
 
         case 8: // Exit
-            console.log('');
-            console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
+            screen.write('\n');
+            screen.write(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset + '\n');
+            screen.exit();
             process.exit(0);
             break;
 
         default:
             showMenu();
             break;
+    }
+}
+
+/**
+ * Show configuration management submenu
+ */
+async function showConfigManagement(restoreIndex = 0) {
+    const versionChecker = require('./lib/utils/version-checker');
+    const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+
+    const config = await versionChecker.loadConfig();
+
+    // Build labels with padding to align current values
+    const labelWidth = 40;
+
+    const langName = i18n.getCurrentLanguageName();
+    const autoUpgradeVal = config.autoModelUpgrade
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const upgradeNotifVal = config.showModelUpgradeNotification !== false
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const telemetryVal = config.disableTelemetry !== false
+        ? i18n.tSync('config.values.recommended_off')
+        : i18n.tSync('config.values.on');
+    const launchModeVal = config.apiLaunchMode === 'select'
+        ? i18n.tSync('config.values.select_mode')
+        : i18n.tSync('config.values.direct_mode');
+
+    const menuOptions = [
+        padStringToWidth(i18n.tSync('menu.config.language'), labelWidth) + langName,
+        padStringToWidth(i18n.tSync('menu.config.auto_model_upgrade'), labelWidth) + autoUpgradeVal,
+        padStringToWidth(i18n.tSync('menu.config.model_upgrade_notification'), labelWidth) + upgradeNotifVal,
+        padStringToWidth(i18n.tSync('menu.config.telemetry'), labelWidth) + telemetryVal,
+        padStringToWidth(i18n.tSync('menu.config.api_launch_mode'), labelWidth) + launchModeVal,
+        i18n.tSync('menu.config.back')
+    ];
+
+    // Synchronous hint callback for config items
+    const hintCallback = (selectedIndex) => {
+        switch (selectedIndex) {
+            case 0: return i18n.tSync('hints.config.language', langName);
+            case 1: return i18n.tSync('hints.config.auto_upgrade');
+            case 2: return i18n.tSync('hints.config.upgrade_notification');
+            case 3: return i18n.tSync('hints.config.telemetry');
+            case 4: return i18n.tSync('hints.config.launch_mode');
+            default: return null;
+        }
+    };
+
+    screen.render([
+        '',
+        colors.bright + colors.orange + '⚙️  ' + i18n.tSync('menu.config.title') + colors.reset,
+        '',
+    ]);
+
+    initializeGlobalMenus();
+    globalConfigMenu.setOptions(menuOptions);
+    globalConfigMenu.selectedIndex = restoreIndex;
+    const choice = await globalConfigMenu.navigate(null, hintCallback);
+
+    switch (choice) {
+        case 0: // Language Settings
+            return await showLanguageSettings();
+
+        case 1: { // Auto Model Upgrade toggle
+            const newVal = !config.autoModelUpgrade;
+            config.autoModelUpgrade = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(1);
+        }
+
+        case 2: { // Model Upgrade Notification toggle
+            const newVal = config.showModelUpgradeNotification === false ? true : false;
+            config.showModelUpgradeNotification = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(2);
+        }
+
+        case 3: { // Telemetry toggle
+            const newVal = config.disableTelemetry === false ? true : false;
+            config.disableTelemetry = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(3);
+        }
+
+        case 4: { // API Launch Mode toggle
+            const newVal = config.apiLaunchMode === 'select' ? 'direct' : 'select';
+            config.apiLaunchMode = newVal;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(4);
+        }
+
+        case 5: // Back
+        case -1:
+        default:
+            return showMenu();
     }
 }
 
@@ -1047,6 +1208,9 @@ async function showMenu() {
     try {
         const upgradeChecker = require('./lib/utils/model-upgrade-checker');
         const autoUpgrade = await upgradeChecker.isAutoUpgradeEnabled();
+        const versionChecker = require('./lib/utils/version-checker');
+        const launcherConfig = await versionChecker.loadConfig();
+        const showUpgradeNotif = launcherConfig.showModelUpgradeNotification !== false;
 
         if (autoUpgrade) {
             // Auto upgrade enabled: always check and upgrade (bypass cache)
@@ -1062,8 +1226,8 @@ async function showMenu() {
                     }
                 }
             }
-        } else {
-            // Auto upgrade disabled: use cache for notification
+        } else if (showUpgradeNotif) {
+            // Auto upgrade disabled but notification enabled: use cache for notification
             const result = await upgradeChecker.checkForModelUpgrades(apiManager);
             if (result.needsCheck && result.upgrades.length > 0) {
                 const first = result.upgrades[0];
@@ -1102,40 +1266,106 @@ async function showMenu() {
         await i18n.t('menu.main.launch_api'),
         await i18n.t('menu.main.launch_api_skip'),
         await i18n.t('menu.main.api_management'),
-        await i18n.t('menu.main.language_settings'),
+        await i18n.t('menu.main.config_management'),
         await i18n.t('menu.main.version_check'),
         await i18n.t('menu.main.exit')
     ];
 
-    // Pre-compute hint texts synchronously for menu callback
+    // Pre-compute all hint data synchronously for menu callback
     const hintAutoMode = i18n.tSync('hints.auto_mode_info');
+
     const activeApi = apiManager.getActiveApi();
-    let hintApiInfo = null;
+    const apis = apiManager.getApis();
+    const apiCount = apis.length;
+    const { getProvider } = require('./lib/presets/providers');
+
+    // Pre-compute config for hints
+    const hintConfig = require('./lib/utils/version-checker').loadConfigSync();
+    const hintApiLaunchMode = hintConfig.apiLaunchMode || 'direct';
+
+    // Pre-compute active API details
+    let activeApiName = i18n.tSync('hints.select_mode_active_none');
+    let activeProviderName = '';
+    let activeModel = '';
+    let activeLastUsed = '';
     if (activeApi) {
-        const { getProvider } = require('./lib/presets/providers');
         const providerConfig = getProvider(activeApi.provider);
-        const providerName = providerConfig ? providerConfig.name : (activeApi.provider || 'Custom');
-        hintApiInfo = i18n.tSync('hints.active_api_info', providerName, activeApi.model);
-    } else {
-        hintApiInfo = i18n.tSync('hints.no_active_api');
+        activeProviderName = providerConfig ? providerConfig.name : (activeApi.provider || 'Custom');
+        activeModel = activeApi.model;
+        activeApiName = activeApi.name;
+        activeLastUsed = formatRelativeTime(activeApi.lastUsed || null);
     }
+
+    // Pre-compute API hints for indices 3, 4
+    let hintApiLines = null;
+    if (apiCount === 0) {
+        hintApiLines = i18n.tSync('hints.no_api_configured');
+    } else if (hintApiLaunchMode === 'direct') {
+        if (activeApi) {
+            hintApiLines =
+                i18n.tSync('hints.direct_mode_desc') + '\n' +
+                i18n.tSync('hints.direct_mode_api_info', activeApiName, activeProviderName) + '\n' +
+                i18n.tSync('hints.direct_mode_api_detail', activeModel, activeLastUsed) + '\n' +
+                i18n.tSync('hints.direct_mode_change');
+        } else {
+            hintApiLines =
+                i18n.tSync('hints.direct_mode_no_active') + '\n' +
+                i18n.tSync('hints.direct_mode_no_active_detail', apiCount) + '\n' +
+                '' + '\n' +
+                i18n.tSync('hints.direct_mode_change');
+        }
+    } else {
+        // select mode
+        hintApiLines =
+            i18n.tSync('hints.select_mode_desc') + '\n' +
+            i18n.tSync('hints.select_mode_change') + '\n' +
+            '' + '\n' +
+            i18n.tSync('hints.select_mode_api_count', apiCount, activeApiName);
+    }
+
+    // Pre-compute API management hint (index 5)
+    const hintApiMgmt = i18n.tSync('hints.api_management_info', apiCount, activeApiName);
+
+    // Pre-compute config summary hint (index 6)
+    const cfgLangName = i18n.getCurrentLanguageName();
+    const cfgLaunchMode = hintApiLaunchMode === 'select'
+        ? i18n.tSync('config.values.select_mode')
+        : i18n.tSync('config.values.direct_mode');
+    const cfgTelemetry = hintConfig.disableTelemetry !== false
+        ? i18n.tSync('config.values.off')
+        : i18n.tSync('config.values.on');
+    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry);
 
     // Synchronous hint callback — must not use await
     const hintCallback = (selectedIndex) => {
         switch (selectedIndex) {
-            case 2: return hintAutoMode;
-            case 3: return hintApiInfo;
-            case 4: return hintApiInfo;
-            default: return null;
+            case 0:
+            case 1:
+                return null;
+            case 2:
+                return hintAutoMode;
+            case 3:
+            case 4:
+                return hintApiLines;
+            case 5:
+                return hintApiMgmt;
+            case 6:
+                return hintConfigSummary;
+            case 7:
+            case 8:
+                return null;
+            default:
+                return null;
         }
     };
 
     globalMainMenu.setOptions(menuOptions);
-    const selection = await globalMainMenu.navigate(false, displayInfo || null, hintCallback);
+    const selection = await globalMainMenu.navigate(displayInfo || null, hintCallback);
 
     if (selection === -1) {
-        console.log('');
-        console.log(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset);
+        screen.write('\n');
+        screen.write(colors.green + '👋 ' + await i18n.t('menu.main.exit') + '!' + colors.reset + '\n');
+        screen.exit();
         process.exit(0);
     } else {
         await executeSelection(selection);
@@ -1150,26 +1380,22 @@ async function showMenu() {
  * Export configuration with password encryption
  */
 async function exportConfiguration() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '💾 ' + await i18n.t('import_export.export.title') + colors.reset);
-    console.log('');
-
-    // Add export function description
-    console.log(colors.cyan + '📄 ' + i18n.tSync('import_export.export.description_title') + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[1] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[2] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[3] + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '💾 ' + await i18n.t('import_export.export.title') + colors.reset,
+        '',
+        // Export function description
+        colors.cyan + '📄 ' + i18n.tSync('import_export.export.description_title') + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[1] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[2] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[3] + colors.reset,
+        '',
+    ]);
 
     // Verify password before export
-    const verified = await verifyExportPassword(apiManager, 'export');
-    if (!verified) {
-        console.log('');
-        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
-        return;
-    }
+    const verified = await passwordGuard(apiManager, 'export');
+    if (!verified) return;
 
     try {
         // Get export data
@@ -1183,62 +1409,59 @@ async function exportConfiguration() {
         // Write JSON file
         fs.writeFileSync(filePath, exportData, 'utf8');
 
-        console.log(colors.green + '✓ ' + i18n.tSync('import_export.export.success_title') + colors.reset);
-        console.log('');
-        console.log(colors.cyan + '📁 ' + i18n.tSync('import_export.export.details_title') + colors.reset);
-        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_file_saved', filePath) + colors.reset);
-        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_export_dir', exportDir) + colors.reset);
-        console.log(colors.gray + `  • ` + i18n.tSync('import_export.export.details_filename', filename) + colors.reset);
-        console.log('');
+        screen.write(colors.green + '✓ ' + i18n.tSync('import_export.export.success_title') + colors.reset + '\n');
+        screen.write('\n');
+        screen.write(colors.cyan + '📁 ' + i18n.tSync('import_export.export.details_title') + colors.reset + '\n');
+        screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_file_saved', filePath) + colors.reset + '\n');
+        screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_export_dir', exportDir) + colors.reset + '\n');
+        screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_filename', filename) + colors.reset + '\n');
+        screen.write('\n');
 
         // Open file with default application
-        console.log(colors.yellow + '🔍 ' + i18n.tSync('import_export.export.opening_file') + colors.reset);
+        screen.write(colors.yellow + '🔍 ' + i18n.tSync('import_export.export.opening_file') + colors.reset + '\n');
         openFileWithDefault(filePath);
 
-        console.log('');
-        console.log(colors.cyan + '💡 ' + i18n.tSync('import_export.export.tips_title') + colors.reset);
-        console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[0] + colors.reset);
-        console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[1] + colors.reset);
+        screen.write('\n');
+        screen.write(colors.cyan + '💡 ' + i18n.tSync('import_export.export.tips_title') + colors.reset + '\n');
+        screen.write(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[0] + colors.reset + '\n');
+        screen.write(colors.gray + '  • ' + i18n.tSync('import_export.export.tips_items')[1] + colors.reset + '\n');
 
     } catch (error) {
         forceStdinCleanup();
-        console.log(colors.red + `❌ Export failed: ${error.message}` + colors.reset);
+        screen.write(colors.red + `❌ Export failed: ${error.message}` + colors.reset + '\n');
     }
 
-    console.log('');
-    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+    screen.write('\n');
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
 }
 
 /**
  * Import configuration from plaintext JSON
  */
 async function importConfiguration() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '📥 ' + await i18n.t('import_export.import.title') + colors.reset);
-    console.log('');
-
-    // Add import function description
-    console.log(colors.cyan + '📄 ' + i18n.tSync('ui.general.import_function_description') + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[0] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[1] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[2] + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '📥 ' + await i18n.t('import_export.import.title') + colors.reset,
+        '',
+        // Import function description
+        colors.cyan + '📄 ' + i18n.tSync('ui.general.import_function_description') + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('import_export.export.description_items')[0] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[0] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[1] + colors.reset,
+        colors.gray + '  • ' + i18n.tSync('ui.general.import_description_items')[2] + colors.reset,
+        '',
+    ]);
 
     // Verify password identity
-    const passwordVerified = await verifyExportPassword(apiManager, 'import');
-    if (!passwordVerified) {
-        await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
-        return;
-    }
+    const passwordVerified = await passwordGuard(apiManager, 'import');
+    if (!passwordVerified) return;
 
-    console.log('');
-    console.log(colors.cyan + '📁 ' + i18n.tSync('ui.general.file_input_required') + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[0] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[1] + colors.reset);
-    console.log(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[2] + colors.reset);
-    console.log('');
+    screen.write('\n');
+    screen.write(colors.cyan + '📁 ' + i18n.tSync('ui.general.file_input_required') + colors.reset + '\n');
+    screen.write(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[0] + colors.reset + '\n');
+    screen.write(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[1] + colors.reset + '\n');
+    screen.write(colors.gray + '  • ' + i18n.tSync('ui.general.file_input_items')[2] + colors.reset + '\n');
+    screen.write('\n');
 
     const { simpleInput } = require('./lib/ui/prompts');
 
@@ -1253,85 +1476,86 @@ async function importConfiguration() {
         const filePath = await simpleInput(colors.green + filePrompt + colors.reset);
 
         if (!filePath) {
-            console.log(colors.red + i18n.tSync('ui.general.file_path_empty') + colors.reset);
+            screen.write(colors.red + i18n.tSync('ui.general.file_path_empty') + colors.reset + '\n');
             if (attempts < maxAttempts) {
-                console.log('');
+                screen.write('\n');
                 continue;
             } else {
-                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset);
+                screen.write(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset + '\n');
                 await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
                 return;
             }
         }
 
         // Validate file
-        console.log('');
-        console.log(colors.yellow + i18n.tSync('ui.general.validating_file') + colors.reset);
+        screen.write('\n');
+        screen.write(colors.yellow + i18n.tSync('ui.general.validating_file') + colors.reset + '\n');
         const validation = validateImportFile(filePath);
 
         if (!validation.valid) {
-            console.log(colors.red + '❌ ' + i18n.tSync('ui.general.file_validation_failed', validation.error) + colors.reset);
+            screen.write(colors.red + '❌ ' + i18n.tSync('ui.general.file_validation_failed', validation.error) + colors.reset + '\n');
             if (attempts < maxAttempts) {
-                console.log(colors.yellow + i18n.tSync('ui.general.check_file_path_json') + colors.reset);
-                console.log('');
+                screen.write(colors.yellow + i18n.tSync('ui.general.check_file_path_json') + colors.reset + '\n');
+                screen.write('\n');
                 continue;
             } else {
-                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset);
+                screen.write(colors.red + i18n.tSync('ui.general.max_attempts_import_cancelled') + colors.reset + '\n');
                 await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
                 return;
             }
         }
 
         // File is valid, proceed with import
-        console.log(colors.green + i18n.tSync('ui.general.file_validation_successful') + colors.reset);
-        console.log('');
+        screen.write(colors.green + i18n.tSync('ui.general.file_validation_successful') + colors.reset + '\n');
+        screen.write('\n');
 
         try {
             // Import the validated configuration data
             const result = apiManager.importConfigAuthenticated(validation.data);
 
-            console.log(colors.green + i18n.tSync('ui.general.import_successful') + colors.reset);
-            console.log('');
-            console.log(colors.cyan + i18n.tSync('ui.general.import_statistics') + colors.reset);
+            screen.write(colors.green + i18n.tSync('ui.general.import_successful') + colors.reset + '\n');
+            screen.write('\n');
+            screen.write(colors.cyan + i18n.tSync('ui.general.import_statistics') + colors.reset + '\n');
             const importItems = i18n.tSync('ui.general.import_stats_items');
-            console.log(colors.gray + `  • ` + importItems[0].replace('{0}', result.imported) + colors.reset);
-            console.log(colors.gray + `  • ` + importItems[1].replace('{1}', result.skipped) + colors.reset);
-            console.log(colors.gray + `  • ` + importItems[2] + colors.reset);
-            console.log(colors.gray + `  • ` + importItems[3].replace('{0}', path.resolve(filePath)) + colors.reset);
+            screen.write(colors.gray + `  • ` + importItems[0].replace('{0}', result.imported) + colors.reset + '\n');
+            screen.write(colors.gray + `  • ` + importItems[1].replace('{1}', result.skipped) + colors.reset + '\n');
+            screen.write(colors.gray + `  • ` + importItems[2] + colors.reset + '\n');
+            screen.write(colors.gray + `  • ` + importItems[3].replace('{0}', path.resolve(filePath)) + colors.reset + '\n');
 
             break; // Success, exit the loop
 
         } catch (error) {
             forceStdinCleanup();
-            console.log(colors.red + `❌ Import failed: ${error.message}` + colors.reset);
+            screen.write(colors.red + `❌ Import failed: ${error.message}` + colors.reset + '\n');
             if (attempts < maxAttempts) {
-                console.log(colors.yellow + i18n.tSync('ui.general.import_tips')[0] + colors.reset);
-                console.log('');
+                screen.write(colors.yellow + i18n.tSync('ui.general.import_tips')[0] + colors.reset + '\n');
+                screen.write('\n');
                 continue;
             } else {
-                console.log(colors.red + i18n.tSync('ui.general.max_attempts_import_failed') + colors.reset);
+                screen.write(colors.red + i18n.tSync('ui.general.max_attempts_import_failed') + colors.reset + '\n');
             }
         }
     }
 
-    console.log('');
-    await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
+    screen.write('\n');
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
 }
 
 /**
  * Change password
  */
 async function changePassword() {
-    console.clear();
-    console.log('');
-    console.log(colors.bright + colors.orange + '🔑 ' + i18n.tSync('errors.password.change_password_title') + colors.reset);
-    console.log('');
+    screen.render([
+        '',
+        colors.bright + colors.orange + '🔑 ' + i18n.tSync('errors.password.change_password_title') + colors.reset,
+        '',
+    ]);
 
     // Use unified password change module
     const success = await changePasswordModule(apiManager);
 
     if (success) {
-        console.log('');
+        screen.write('\n');
     }
 
     await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
@@ -1346,16 +1570,16 @@ async function showLanguageSettings() {
         const currentLanguage = i18n.getCurrentLanguage();
         const currentLanguageName = i18n.getCurrentLanguageName();
 
-        console.clear();
-        console.log('');
-        console.log(colors.bright + colors.orange + '🌍 ' + await i18n.t('menu.language.title') + colors.reset);
-        console.log('');
-
-        // Show current language
-        console.log(colors.cyan + await i18n.t('menu.language.current', currentLanguageName) + colors.reset);
-        console.log('');
-        console.log(colors.yellow + await i18n.t('menu.language.select_prompt') + colors.reset);
-        console.log('');
+        screen.render([
+            '',
+            colors.bright + colors.orange + '🌍 ' + await i18n.t('menu.language.title') + colors.reset,
+            '',
+            // Show current language
+            colors.cyan + await i18n.t('menu.language.current', currentLanguageName) + colors.reset,
+            '',
+            colors.yellow + await i18n.t('menu.language.select_prompt') + colors.reset,
+            '',
+        ]);
 
         // Create menu options
         const languageOptions = [];
@@ -1388,14 +1612,14 @@ async function showLanguageSettings() {
         }
 
         // Switch language
-        console.clear();
-            console.log('');
-            console.log(colors.yellow + await i18n.t('status.switching_language') + colors.reset);
+        screen.render([
+            '',
+            colors.yellow + await i18n.t('status.switching_language') + colors.reset,
+        ]);
 
             try {
                 await i18n.setLanguage(selectedLangCode);
 
-                console.clear();
                 const newLanguageName = i18n.getCurrentLanguageName();
                 showSuccess(await i18n.t('messages.success.language_changed'), [
                     await i18n.t('menu.language.changed_success', newLanguageName)
@@ -1424,18 +1648,18 @@ async function showLanguageSettings() {
  */
 async function showVersionUpdateCheck() {
     try {
-        console.clear();
-        console.log('');
-        console.log(colors.bright + colors.orange + '🔄 ' + await i18n.t('version_check.title') + colors.reset);
-        console.log('');
-
-        console.log(colors.cyan + await i18n.t('version_check.checking') + colors.reset);
-        console.log(colors.gray + await i18n.t('version_check.please_wait') + colors.reset);
-        console.log('');
+        screen.render([
+            '',
+            colors.bright + colors.orange + '🔄 ' + await i18n.t('version_check.title') + colors.reset,
+            '',
+            colors.cyan + await i18n.t('version_check.checking') + colors.reset,
+            colors.gray + await i18n.t('version_check.please_wait') + colors.reset,
+            '',
+        ]);
 
         // Show progress indicator
         const progressInterval = setInterval(() => {
-            process.stdout.write('.');
+            screen.write('.');
         }, 500);
 
         try {
@@ -1444,46 +1668,46 @@ async function showVersionUpdateCheck() {
 
             // Stop progress indicator
             clearInterval(progressInterval);
-            console.log('\n');
+            screen.write('\n\n');
 
             if (result.error) {
                 // Handle errors (timeout, network, etc.)
-                console.log(colors.red + '❌ ' + await i18n.t('version_check.error') + colors.reset);
-                console.log(colors.red + '   ' + result.error + colors.reset);
-                console.log('');
-                console.log(colors.gray + await i18n.t('version_check.error_tips') + colors.reset);
+                screen.write(colors.red + '❌ ' + await i18n.t('version_check.error') + colors.reset + '\n');
+                screen.write(colors.red + '   ' + result.error + colors.reset + '\n');
+                screen.write('\n');
+                screen.write(colors.gray + await i18n.t('version_check.error_tips') + colors.reset + '\n');
             } else if (result.available) {
                 // Update available
-                console.log(colors.yellow + '🎉 ' + await i18n.t('version_check.update_available') + colors.reset);
-                console.log('');
-                console.log(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset);
-                console.log(colors.green + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset);
-                console.log('');
-                console.log(colors.yellow + '💡 ' + await i18n.t('version_check.update_command') + colors.reset);
-                console.log(colors.yellow + '   npm update -g @kikkimo/claude-launcher' + colors.reset);
+                screen.write(colors.yellow + '🎉 ' + await i18n.t('version_check.update_available') + colors.reset + '\n');
+                screen.write('\n');
+                screen.write(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset + '\n');
+                screen.write(colors.green + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset + '\n');
+                screen.write('\n');
+                screen.write(colors.yellow + '💡 ' + await i18n.t('version_check.update_command') + colors.reset + '\n');
+                screen.write(colors.yellow + '   npm update -g @kikkimo/claude-launcher' + colors.reset + '\n');
             } else {
                 // Already up to date
-                console.log(colors.green + '✅ ' + await i18n.t('version_check.up_to_date') + colors.reset);
-                console.log('');
-                console.log(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset);
-                console.log(colors.cyan + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset);
+                screen.write(colors.green + '✅ ' + await i18n.t('version_check.up_to_date') + colors.reset + '\n');
+                screen.write('\n');
+                screen.write(colors.cyan + '   ' + await i18n.t('version_check.current_version', result.currentVersion) + colors.reset + '\n');
+                screen.write(colors.cyan + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset + '\n');
             }
 
         } catch (error) {
             // Stop progress indicator
             clearInterval(progressInterval);
-            console.log('\n');
+            screen.write('\n\n');
 
-            console.log(colors.red + '❌ ' + await i18n.t('version_check.unexpected_error') + colors.reset);
-            console.log(colors.red + '   ' + error.message + colors.reset);
+            screen.write(colors.red + '❌ ' + await i18n.t('version_check.unexpected_error') + colors.reset + '\n');
+            screen.write(colors.red + '   ' + error.message + colors.reset + '\n');
         }
 
-        console.log('');
+        screen.write('\n');
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
         return showMenu();
 
     } catch (error) {
-        console.log(colors.red + '❌ Failed to check version: ' + error.message + colors.reset);
+        screen.write(colors.red + '❌ Failed to check version: ' + error.message + colors.reset + '\n');
         await waitForKey(i18n.tSync('messages.prompts.press_any_key_menu'));
         return showMenu();
     }
@@ -1495,8 +1719,9 @@ async function showVersionUpdateCheck() {
  * Graceful shutdown handlers
  */
 process.on('SIGTERM', () => {
-    console.log('');
-    console.log(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset);
+    screen.write('\n');
+    screen.write(colors.green + i18n.tSync('ui.general.goodbye') + colors.reset + '\n');
+    screen.exit();
     process.exit(0);
 });
 
@@ -1509,43 +1734,34 @@ const stdinManager = require('./lib/utils/stdin-manager');
 let exiting = false;
 
 process.on('SIGINT', () => {
-    // During Claude run, ignore in launcher so child handles it
-    // Check this BEFORE setting exiting flag to avoid breaking reentrancy protection
     if (stdinManager.isSuspended && stdinManager.isSuspended()) {
         return;
     }
-
-    // Prevent re-entrance - ensure cleanup runs only once
-    if (exiting) {
-        return;
-    }
+    if (exiting) return;
     exiting = true;
-
-    // Try to reset stdin state before handling
     try {
         if (process.stdin.isTTY) {
             process.stdin.setRawMode(false);
             process.stdin.pause();
         }
-    } catch (_) {
-        // Ignore errors during emergency cleanup
-    }
-
-    // Use unified Ctrl+C handler from StdinManager (synchronous)
+    } catch (_) {}
     try {
-        stdinManager.handleCtrlC();
-    } catch (_) {
-        // Ignore errors during Ctrl+C handling
-    }
-
-    // Exit with standard SIGINT exit code (128 + 2 = 130)
-    // Note: If handleCtrlC() calls process.exit(0) for second Ctrl+C,
-    // this line won't be reached, which is expected behavior
+        const shouldExit = stdinManager.handleCtrlC();
+        if (shouldExit === false) {
+            exiting = false;
+            return;
+        }
+    } catch (_) {}
+    screen.exit();
     process.exit(130);
 });
+
+process.on('uncaughtException', (err) => { screen.exit(); console.error(err); process.exit(1); });
+process.on('unhandledRejection', (err) => { screen.exit(); console.error(err); process.exit(1); });
 
 // Initialize global menus and start the application
 initializeGlobalMenus();
 
 // Start the application
+screen.enter();
 showMenu();
