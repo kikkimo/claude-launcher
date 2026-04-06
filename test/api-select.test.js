@@ -184,5 +184,158 @@ test('navigation.use_arrows_esc does not contain "main menu"', () => {
     assert.ok(!en.navigation.use_arrows_esc.includes('main menu'));
 });
 
+// ─── Pagination tests ───
+
+console.log('\ncalculatePagination():');
+
+test('single page with 3 APIs and large terminal', () => {
+    const { calculatePagination } = require('../lib/ui/interactive-table');
+    const { itemsPerPage, totalPages } = calculatePagination(3, 40, false);
+    assert.ok(itemsPerPage >= 3, 'Should fit all 3 on one page');
+    assert.strictEqual(totalPages, 1);
+});
+
+test('multi-page with 7 APIs and rows=30', () => {
+    const { calculatePagination } = require('../lib/ui/interactive-table');
+    const { itemsPerPage, totalPages } = calculatePagination(7, 30, false);
+    assert.ok(itemsPerPage < 7, 'Should not fit all 7');
+    assert.ok(totalPages > 1, 'Should need multiple pages');
+});
+
+test('switch mode has fewer items per page', () => {
+    const { calculatePagination } = require('../lib/ui/interactive-table');
+    const normal = calculatePagination(7, 30, false);
+    const switchMode = calculatePagination(7, 30, true);
+    assert.ok(switchMode.itemsPerPage <= normal.itemsPerPage, 'Switch overhead reduces capacity');
+});
+
+test('minimum 1 item per page even on tiny terminal', () => {
+    const { calculatePagination } = require('../lib/ui/interactive-table');
+    const { itemsPerPage } = calculatePagination(10, 15, false);
+    assert.strictEqual(itemsPerPage, 1);
+});
+
+test('legacy overflow adds warning line overhead', () => {
+    const { calculatePagination } = require('../lib/ui/interactive-table');
+    const normal = calculatePagination(99, 30, false, false);
+    const legacy = calculatePagination(99, 30, false, true);
+    assert.ok(legacy.itemsPerPage <= normal.itemsPerPage, 'Warning line reduces capacity');
+});
+
+console.log('\ninitPaginationState():');
+
+test('switch mode positions on active API page', () => {
+    const { initPaginationState } = require('../lib/ui/interactive-table');
+    const { currentPage, pageSelections } = initPaginationState(3, 3, 5, 'switch', 7);
+    assert.strictEqual(currentPage, 1);
+    assert.strictEqual(pageSelections[1], 2);
+});
+
+test('OOB activeIndex falls back to page 0', () => {
+    const { initPaginationState } = require('../lib/ui/interactive-table');
+    const { currentPage, pageSelections } = initPaginationState(3, 3, 99, 'switch', 7);
+    assert.strictEqual(currentPage, 0);
+    assert.strictEqual(pageSelections[0], 0);
+});
+
+test('last-page hole falls back to page 0', () => {
+    const { initPaginationState } = require('../lib/ui/interactive-table');
+    const { currentPage, pageSelections } = initPaginationState(3, 3, 8, 'switch', 7);
+    assert.strictEqual(currentPage, 0);
+    assert.strictEqual(pageSelections[0], 0);
+});
+
+test('non-switch ignores activeIndex', () => {
+    const { initPaginationState } = require('../lib/ui/interactive-table');
+    const { currentPage } = initPaginationState(3, 3, 5, 'remove', 7);
+    assert.strictEqual(currentPage, 0);
+});
+
+console.log('\nhandlePageKeyPress():');
+
+test('right arrow advances page with wrap', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    const state = { currentPage: 0, pageSelections: [0, 0, 0], itemsPerPage: 3, totalPages: 3, apiCount: 7 };
+    const next = handlePageKeyPress('right', state);
+    assert.strictEqual(next.currentPage, 1);
+    const wrapped = handlePageKeyPress('right', { ...state, currentPage: 2 });
+    assert.strictEqual(wrapped.currentPage, 0);
+});
+
+test('left arrow wraps to last page', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    const state = { currentPage: 0, pageSelections: [0, 0, 0], itemsPerPage: 3, totalPages: 3, apiCount: 7 };
+    const wrapped = handlePageKeyPress('left', state);
+    assert.strictEqual(wrapped.currentPage, 2);
+});
+
+test('up/down wraps within page', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    const state = { currentPage: 0, pageSelections: [0, 0], itemsPerPage: 3, totalPages: 2, apiCount: 5 };
+    const down = handlePageKeyPress('down', state);
+    assert.strictEqual(down.pageSelections[0], 1);
+    const up = handlePageKeyPress('up', state);
+    assert.strictEqual(up.pageSelections[0], 2); // wraps to last item (index 2)
+});
+
+test('enter returns global index', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    const state = { currentPage: 1, pageSelections: [0, 1], itemsPerPage: 3, totalPages: 2, apiCount: 5 };
+    const result = handlePageKeyPress('enter', state);
+    assert.strictEqual(result.action, 'select');
+    assert.strictEqual(result.globalIndex, 4); // page 1, item 1 = 3+1=4
+});
+
+test('escape returns cancel', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    const state = { currentPage: 0, pageSelections: [0], itemsPerPage: 3, totalPages: 1, apiCount: 3 };
+    const result = handlePageKeyPress('escape', state);
+    assert.strictEqual(result.action, 'cancel');
+});
+
+test('page selection memory persists', () => {
+    const { handlePageKeyPress } = require('../lib/ui/interactive-table');
+    let state = { currentPage: 0, pageSelections: [0, 0], itemsPerPage: 3, totalPages: 2, apiCount: 5 };
+    state = handlePageKeyPress('down', state); // page 0 item 1
+    state = handlePageKeyPress('down', state); // page 0 item 2
+    state = handlePageKeyPress('right', state); // go to page 1
+    state = handlePageKeyPress('left', state); // back to page 0
+    assert.strictEqual(state.pageSelections[0], 2); // still item 2
+});
+
+console.log('\nlocale parity:');
+
+test('navigation.use_arrows_page_esc exists in all 11 locales', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const localeDir = path.join(__dirname, '..', 'lib', 'i18n', 'locales');
+    const files = fs.readdirSync(localeDir).filter(f => f.endsWith('.js'));
+    assert.ok(files.length >= 11, 'Should have at least 11 locale files');
+    for (const file of files) {
+        const locale = require(path.join(localeDir, file));
+        assert.ok(locale.navigation && locale.navigation.use_arrows_page_esc,
+            `${file} missing navigation.use_arrows_page_esc`);
+    }
+});
+
+console.log('\nAPI limit:');
+
+test('addApi throws when at 99 APIs', () => {
+    const ApiManager = require('../lib/api-manager');
+    const mgr = new ApiManager();
+    mgr.config = {
+        apis: new Array(99).fill(null).map((_, i) => ({
+            id: `test-${i}`, name: `API-${i}`, provider: 'custom',
+            baseUrl: `https://example${i}.com`, authToken: 'fake',
+            model: `model-${i}`, smallFastModel: `model-${i}`,
+            createdAt: new Date().toISOString(), lastUsed: null,
+            usageCount: 0, successCount: 0, failCount: 0, lastError: null
+        })),
+        activeIndex: 0, version: '2.0.0', createdAt: new Date().toISOString(),
+        exportPassword: null, passwordSkipped: false
+    };
+    assert.throws(() => mgr.addApi('https://new.com', 'token-12345678', 'new-model', 'New API'), /maximum 99/i);
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
