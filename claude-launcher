@@ -53,7 +53,7 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
-const { editApi } = require('./lib/ui/api-editor');
+const { editApi, editApiById } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
 const screen = require('./lib/ui/screen');
 const fs = require('fs');
@@ -252,17 +252,23 @@ async function addNewThirdPartyApi() {
         }
 
     } catch (error) {
-        // Force cleanup stdin state to prevent navigation issues
         forceStdinCleanup();
 
-        // Check if user cancelled the operation
-        const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
-        if (error.message === cancelledMessage) {
-            // User cancelled - show neutral message instead of error
-            screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
+        if (error.code === 'DUPLICATE_API') {
+            screen.write(colors.yellow + i18n.tSync('api.add.duplicate_detected', error.existingApiName) + colors.reset + '\n');
+            screen.write('  [1] ' + i18n.tSync('api.add.jump_to_edit') + '\n');
+            screen.write('  [2] ' + i18n.tSync('api.add.cancel') + '\n');
+            const choice = await simpleInput('> ');
+            if (choice === '1') {
+                await editApiById(apiManager, { apiId: error.existingApiId, initialSection: 'runtimeEnvVars' });
+            }
         } else {
-            // Actual error occurred
-            showError(await i18n.t('errors.api.failed_add', error.message));
+            const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
+            if (error.message === cancelledMessage) {
+                screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
+            } else {
+                showError(await i18n.t('errors.api.failed_add', error.message));
+            }
         }
     }
 
