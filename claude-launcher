@@ -1355,7 +1355,7 @@ async function showMenu() {
         ? i18n.tSync('config.values.on')
         : i18n.tSync('config.values.off');
     const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry)
-        + '\n' + i18n.tSync('hints.config.no_flicker_status', cfgNoFlicker);
+        + '\n' + i18n.tSync('hints.no_flicker_status', cfgNoFlicker);
 
     // Synchronous hint callback — must not use await
     const hintCallback = (selectedIndex) => {
