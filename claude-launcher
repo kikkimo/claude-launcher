@@ -1090,6 +1090,9 @@ async function showConfigManagement(restoreIndex = 0) {
     const launchModeVal = config.apiLaunchMode === 'select'
         ? i18n.tSync('config.values.select_mode')
         : i18n.tSync('config.values.direct_mode');
+    const noFlickerVal = config.noFlicker
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
 
     const menuOptions = [
         padStringToWidth(i18n.tSync('menu.config.language'), labelWidth) + langName,
@@ -1097,6 +1100,7 @@ async function showConfigManagement(restoreIndex = 0) {
         padStringToWidth(i18n.tSync('menu.config.model_upgrade_notification'), labelWidth) + upgradeNotifVal,
         padStringToWidth(i18n.tSync('menu.config.telemetry'), labelWidth) + telemetryVal,
         padStringToWidth(i18n.tSync('menu.config.api_launch_mode'), labelWidth) + launchModeVal,
+        padStringToWidth(i18n.tSync('menu.config.no_flicker'), labelWidth) + noFlickerVal,
         i18n.tSync('menu.config.back')
     ];
 
@@ -1108,6 +1112,7 @@ async function showConfigManagement(restoreIndex = 0) {
             case 2: return i18n.tSync('hints.config.upgrade_notification');
             case 3: return i18n.tSync('hints.config.telemetry');
             case 4: return i18n.tSync('hints.config.launch_mode');
+            case 5: return i18n.tSync('hints.config.no_flicker');
             default: return null;
         }
     };
@@ -1155,7 +1160,13 @@ async function showConfigManagement(restoreIndex = 0) {
             return showConfigManagement(4);
         }
 
-        case 5: // Back
+        case 5: { // noFlicker toggle
+            config.noFlicker = !config.noFlicker;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(5);
+        }
+
+        case 6: // Back
         case -1:
         default:
             return showMenu();
@@ -1334,7 +1345,11 @@ async function showMenu() {
     const cfgTelemetry = hintConfig.disableTelemetry !== false
         ? i18n.tSync('config.values.off')
         : i18n.tSync('config.values.on');
-    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry);
+    const cfgNoFlicker = hintConfig.noFlicker
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry)
+        + '\n' + i18n.tSync('hints.config.no_flicker_status', cfgNoFlicker);
 
     // Synchronous hint callback — must not use await
     const hintCallback = (selectedIndex) => {
