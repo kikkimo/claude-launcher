@@ -346,14 +346,19 @@ async function editDraftModelConfig(draft) {
     const getLabel = (key) => i18nLabel("model", key, MODEL_CONFIG_LABELS);
 
     while (true) {
-        const options = PREDEFINED_MODEL_ENV_KEYS.map((key) => {
+        const rows = PREDEFINED_MODEL_ENV_KEYS.map((key) => {
             const currentVal = draft.modelEnvVars[key] || '';
             const autoVal = draft._autoModelEnvVars[key] || '';
             const displayVal = currentVal || autoVal || i18n.tSync('status.not_set');
             const isOverridden = autoVal !== '' && currentVal !== autoVal;
             const mark = isOverridden ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
-            const label = '  ' + getLabel(key).padEnd(24);
-            return colors.reset + label + displayVal + mark;
+            return { label: '  ' + getLabel(key), displayVal, mark };
+        });
+        const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+        const maxLabelW = Math.max(...rows.map(r => getStringWidth(r.label)));
+        const maxValueW = Math.max(...rows.map(r => getStringWidth(r.displayVal)));
+        const options = rows.map(r => {
+            return colors.reset + padStringToWidth(r.label, maxLabelW + 2) + '  ' + padStringToWidth(r.displayVal, maxValueW) + r.mark;
         });
         options.push(i18n.tSync('api.edit.back'));
         menu.setOptions(options);
@@ -405,15 +410,20 @@ async function editDraftRuntimeConfig(draft) {
 
     while (true) {
         const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
-        const options = runtimeKeys.map(key => {
+        const rows = runtimeKeys.map(key => {
             const val = draft.runtimeEnvVars[key] || '';
             const display = (val === '') ? i18n.tSync('status.default')
                 : (TYPE_A_FIELDS.includes(key) && val === 'off') ? i18n.tSync('status.disabled')
                 : val;
             const isManual = (draft._runtimeEnvSources || {})[key] === 'manual';
             const mark = isManual ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
-            const label = '  ' + getLabel(key).padEnd(22);
-            return colors.reset + label + display + mark;
+            return { label: '  ' + getLabel(key), display, mark };
+        });
+        const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+        const maxLabelW = Math.max(...rows.map(r => getStringWidth(r.label)));
+        const maxValueW = Math.max(...rows.map(r => getStringWidth(r.display)));
+        const options = rows.map(r => {
+            return colors.reset + padStringToWidth(r.label, maxLabelW + 2) + '  ' + padStringToWidth(r.display, maxValueW) + r.mark;
         });
         options.push(i18n.tSync('api.edit.back'));
         menu.setOptions(options);
