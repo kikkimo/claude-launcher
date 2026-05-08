@@ -485,6 +485,7 @@ async function showConfigConfirmation(draft) {
         i18n.tSync('api.details.provider') + ': ' + resolveProviderName(draft.provider),
         i18n.tSync('api.details.url') + ': ' + draft.baseUrl,
         i18n.tSync('api.details.model') + ': ' + draft.model,
+        '', colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset,
         '', i18n.tSync('page.model_config') + '  ' + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + ' ' + i18n.tSync('status.overridden'),
         i18n.tSync('page.runtime_config') + '  ' + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + ' ' + i18n.tSync('status.overridden'),
         i18n.tSync('page.custom_vars') + '  ' + i18n.tSync('summary.x_items', String(customCount)),
