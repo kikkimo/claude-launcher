@@ -42,7 +42,8 @@ const {
     confirmAction,
     showSuccess,
     showError,
-    showInfo
+    showInfo,
+    selectProvider,
 } = require('./lib/ui/prompts');
 const {
     launchClaudeDefault,
@@ -54,7 +55,7 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
-const { editApi, editApiEnvVarsById } = require('./lib/ui/api-editor');
+const { editApi, editApiEnvVarsById, resolveProviderName } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
 const screen = require('./lib/ui/screen');
 const fs = require('fs');
@@ -222,59 +223,487 @@ function validateImportFile(filePath) {
 // Main menu options - will be populated dynamically with i18n
 let menuOptions = [];
 
+// --- Add API flow helpers ---
+
 /**
- * Add new third-party API
+ * Input helper for add-api steps. Supports Esc / "back" to go back,
+ * "exit"/"quit" to cancel, empty input uses defaultValue if provided.
+ * @returns {string|null} - input value, or null to go back
  */
-async function addNewThirdPartyApi() {
-    try {
-        const apiData = await promptForThirdPartyApi();
+async function inputStepValue(promptText, { defaultValue, allowEmpty } = {}) {
+    screen.render([
+        '',
+        colors.cyan + promptText + colors.reset,
+        '',
+        colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset,
+        colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset,
+        '',
+    ]);
+    const input = await simpleInput(colors.green + '> ' + colors.reset);
+    if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
+        const cancelledMsg = await i18n.t('errors.general.cancelled_by_user');
+        throw new Error(cancelledMsg);
+    }
+    if (input.toLowerCase() === 'back') {
+        return null;
+    }
+    if (input === '') {
+        if (allowEmpty) return '';
+        if (defaultValue !== undefined) return defaultValue;
+    }
+    return input;
+}
 
-        // Check if this is the first API
-        const isFirstApi = apiManager.getApis().length === 0;
+/**
+ * Rebuild draft after user goes back and re-enters connection info.
+ * Preserves manual overrides from oldDraft for model/runtime/custom sections.
+ */
+function rebuildDraftPreservingOverrides(oldDraft, providerId, baseUrl, authToken, model, name) {
+    const draft = ApiManager.buildApiDraft(providerId, baseUrl, authToken, model, name);
+    if (!oldDraft) return draft;
 
-        const newApi = apiManager.addApi(
-            apiData.baseUrl,
-            apiData.authToken,
-            apiData.model,
-            apiData.name,
-            apiData.provider
-        );
-
-        showSuccess(await i18n.t('messages.success.api_added'), [
-            `Name: ${newApi.name}`,
-            `${await i18n.t('api.details.provider')}: ${newApi.provider}`,
-            `${await i18n.t('api.details.url')}: ${newApi.baseUrl}`,
-            `${await i18n.t('api.details.model')}: ${newApi.model}`
-        ]);
-
-        if (isFirstApi) {
-            showInfo(await i18n.t('messages.info.first_time_usage'));
+    // Preserve model overrides: if user set a value different from auto, keep it
+    const oldAuto = oldDraft._autoModelEnvVars || {};
+    for (const k of Object.keys(oldDraft.modelEnvVars || {})) {
+        if (oldDraft.modelEnvVars[k] !== oldAuto[k]) {
+            draft.modelEnvVars[k] = oldDraft.modelEnvVars[k];
         }
+    }
+    // Preserve runtime manual overrides
+    const oldRtSources = oldDraft._runtimeEnvSources || {};
+    for (const k of Object.keys(oldRtSources)) {
+        if (oldRtSources[k] === 'manual') {
+            draft.runtimeEnvVars[k] = oldDraft.runtimeEnvVars[k];
+            draft._runtimeEnvSources[k] = 'manual';
+        }
+    }
+    // Preserve custom vars
+    draft.customEnvVars = { ...(oldDraft.customEnvVars || {}) };
+    return draft;
+}
 
-        await editApiEnvVarsById(apiManager, { apiId: newApi.id });
+/**
+ * Show duplicate API branch: enter existing config or go back.
+ * @returns {'enter_existing'|'go_back'}
+ */
+async function showDuplicateBranch(existingApi) {
+    const menu = new Menu();
+    screen.render([
+        '', colors.yellow + i18n.tSync('add_api.duplicate_title') + colors.reset, '',
+        i18n.tSync('api.edit.field_name') + ': ' + existingApi.name,
+        i18n.tSync('api.details.provider') + ': ' + resolveProviderName(existingApi.provider),
+        i18n.tSync('api.details.url') + ': ' + existingApi.baseUrl,
+        i18n.tSync('api.details.model') + ': ' + existingApi.model,
+        '', colors.gray + i18n.tSync('add_api.duplicate_draft_discarded') + colors.reset, '',
+        i18n.tSync('action.please_choose'), '',
+    ]);
+    menu.setOptions([
+        i18n.tSync('add_api.duplicate_enter_config'),
+        i18n.tSync('add_api.duplicate_back'),
+    ]);
+    const choice = await menu.navigate();
+    if (choice === 0) return 'enter_existing';
+    return 'go_back';
+}
 
-    } catch (error) {
-        forceStdinCleanup();
+// --- Draft editing sub-pages (no persistence, operate on draft object) ---
 
-        if (error.code === 'DUPLICATE_API') {
-            screen.write(colors.yellow + i18n.tSync('api.add.duplicate_detected', error.existingApiName) + colors.reset + '\n');
-            screen.write('  [1] ' + i18n.tSync('api.add.jump_to_edit') + '\n');
-            screen.write('  [2] ' + i18n.tSync('api.add.cancel') + '\n');
-            const choice = await simpleInput('> ');
-            if (choice === '1') {
-                await editApiEnvVarsById(apiManager, { apiId: error.existingApiId, initialSection: 'runtimeEnvVars' });
+async function editDraftModelConfig(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('./lib/validators');
+    const { MODEL_CONFIG_LABELS } = require('./lib/api-manager');
+    const getLabel = (key) => MODEL_CONFIG_LABELS[key] || key;
+
+    while (true) {
+        const options = PREDEFINED_MODEL_ENV_KEYS.map((key) => {
+            const currentVal = draft.modelEnvVars[key] || '';
+            const autoVal = draft._autoModelEnvVars[key] || '';
+            const displayVal = currentVal || autoVal || i18n.tSync('status.not_set');
+            const isOverridden = autoVal !== '' && currentVal !== autoVal;
+            const mark = isOverridden ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
+            const label = '  ' + getLabel(key).padEnd(24);
+            return colors.reset + label + displayVal + mark;
+        });
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === PREDEFINED_MODEL_ENV_KEYS.length) return;
+
+        const key = PREDEFINED_MODEL_ENV_KEYS[choice];
+        const autoVal = draft._autoModelEnvVars[key] || '';
+        const label = getLabel(key);
+        const subMenu = new Menu();
+        let inSub = true;
+        while (inSub) {
+            const currentVal = draft.modelEnvVars[key] || '';
+            screen.render([
+                '', colors.cyan + label + colors.reset, '',
+                i18n.tSync('status.current_value') + ': ' + (currentVal || i18n.tSync('status.not_set')),
+                i18n.tSync('status.recommended_value') + ': ' + (autoVal || i18n.tSync('status.not_set')),
+                '', i18n.tSync('action.please_choose'), '',
+            ]);
+            subMenu.setOptions([
+                i18n.tSync('action.follow_recommended'),
+                i18n.tSync('action.custom_input'),
+                i18n.tSync('api.edit.back'),
+            ]);
+            const subChoice = await subMenu.navigate(null, null);
+            if (subChoice === -1 || subChoice === 2) { inSub = false; break; }
+            if (subChoice === 0) {
+                draft.modelEnvVars[key] = autoVal;
+                inSub = false;
+            } else if (subChoice === 1) {
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.current_value', currentVal),
+                    { allowEmpty: true }
+                );
+                if (input === null) continue; // "back"
+                draft.modelEnvVars[key] = (input === '') ? autoVal : input;
+                inSub = false;
+            }
+        }
+    }
+}
+
+async function editDraftRuntimeConfig(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_RUNTIME_KEYS, TYPE_A_FIELDS, TYPE_B_FIELDS } = require('./lib/validators');
+    const { RUNTIME_CONFIG_LABELS } = require('./lib/api-manager');
+    const getLabel = (key) => RUNTIME_CONFIG_LABELS[key] || key;
+
+    while (true) {
+        const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
+        const options = runtimeKeys.map(key => {
+            const val = draft.runtimeEnvVars[key] || '';
+            const display = (val === '') ? i18n.tSync('status.default')
+                : (TYPE_A_FIELDS.includes(key) && val === 'off') ? i18n.tSync('status.disabled')
+                : val;
+            const isManual = (draft._runtimeEnvSources || {})[key] === 'manual';
+            const mark = isManual ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
+            const label = '  ' + getLabel(key).padEnd(22);
+            return colors.reset + label + display + mark;
+        });
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === runtimeKeys.length) return;
+
+        const key = runtimeKeys[choice];
+        if (TYPE_A_FIELDS.includes(key) || TYPE_B_FIELDS.includes(key)) {
+            const values = TYPE_A_FIELDS.includes(key) ? ['', '1', 'off'] : ['', '1', '0'];
+            try {
+                const v = draft.runtimeEnvVars[key] || '';
+                const idx = values.indexOf(v);
+                const next = values[(idx + 1) % values.length];
+                ApiManager.applyDraftEnvChange(draft, 'runtime', key, next);
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
             }
         } else {
-            const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
-            if (error.message === cancelledMessage) {
-                screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
-            } else {
-                showError(await i18n.t('errors.api.failed_add', error.message));
+            const input = await inputStepValue(
+                i18n.tSync('api.edit.current_value', draft.runtimeEnvVars[key] || i18n.tSync('status.default')),
+                { allowEmpty: true }
+            );
+            if (input === null) continue; // "back"
+            try {
+                ApiManager.applyDraftEnvChange(draft, 'runtime', key, input === '' ? '' : input);
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+            }
+        }
+    }
+}
+
+async function editDraftCustomVars(draft) {
+    const menu = new Menu();
+    while (true) {
+        const keys = Object.keys(draft.customEnvVars || {});
+        const options = keys.length > 0
+            ? keys.map(k => '  ' + k + ' = ' + draft.customEnvVars[k])
+            : [colors.gray + i18n.tSync('api.edit.no_custom_vars') + colors.reset];
+        options.push(i18n.tSync('action.add_variable'));
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === options.length - 1) return;
+        if (choice === options.length - 2) {
+            const keyInput = await inputStepValue(i18n.tSync('api.edit.enter_custom_key'), { allowEmpty: false });
+            if (!keyInput || keyInput === null) continue;
+            const valInput = await inputStepValue(i18n.tSync('api.edit.enter_custom_value'), { allowEmpty: true });
+            if (valInput === null) continue;
+            try {
+                ApiManager.applyDraftEnvChange(draft, 'custom', keyInput, valInput || '');
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+            }
+        } else if (choice < keys.length) {
+            const key = keys[choice];
+            screen.render(['', colors.yellow + i18n.tSync('confirm.delete_variable') + colors.reset]);
+            const confirm = await simpleInput('> ');
+            if (confirm.toLowerCase() === 'y') {
+                ApiManager.deleteDraftCustomEnvVar(draft, key);
+            }
+        }
+    }
+}
+
+async function editDraftSection(draft, section) {
+    if (section === 'modify_model') await editDraftModelConfig(draft);
+    else if (section === 'modify_runtime') await editDraftRuntimeConfig(draft);
+    else if (section === 'modify_custom') await editDraftCustomVars(draft);
+}
+
+/**
+ * Show config confirmation page (step 6).
+ * @returns {'finish'|'back'|'modify_model'|'modify_runtime'|'modify_custom'}
+ */
+async function showConfigConfirmation(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('./lib/validators');
+    const modelOverridden = PREDEFINED_MODEL_ENV_KEYS.filter(k => {
+        const v = draft.modelEnvVars[k] || '';
+        const a = draft._autoModelEnvVars[k];
+        return a !== undefined && v !== a;
+    }).length;
+    const runtimeOverridden = PREDEFINED_RUNTIME_KEYS.filter(k => {
+        const val = (draft.runtimeEnvVars || {})[k] || '';
+        return val !== '';
+    }).length;
+    const customCount = Object.keys(draft.customEnvVars).length;
+
+    screen.render([
+        '', colors.bright + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset,
+        '', i18n.tSync('api.edit.field_name') + ': ' + (draft.name || i18n.tSync('status.not_set')),
+        i18n.tSync('api.details.provider') + ': ' + resolveProviderName(draft.provider),
+        i18n.tSync('api.details.url') + ': ' + draft.baseUrl,
+        i18n.tSync('api.details.model') + ': ' + draft.model,
+        '', i18n.tSync('page.model_config') + '  ' + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + ' ' + i18n.tSync('status.overridden'),
+        i18n.tSync('page.runtime_config') + '  ' + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + ' ' + i18n.tSync('status.overridden'),
+        i18n.tSync('page.custom_vars') + '  ' + i18n.tSync('summary.x_items', String(customCount)),
+        '', i18n.tSync('action.please_choose'), '',
+    ]);
+    menu.setOptions([
+        i18n.tSync('action.finish_create'),
+        i18n.tSync('page.model_config'),
+        i18n.tSync('page.runtime_config'),
+        i18n.tSync('page.custom_vars'),
+        i18n.tSync('api.edit.back'),
+    ]);
+    const hintFn = (idx) => {
+        if (idx === 0) return i18n.tSync('add_api.finish_hint');
+        return null;
+    };
+    const choice = await menu.navigate(null, hintFn);
+    if (choice === -1 || choice === 4) return 'back';
+    if (choice === 0) return 'finish';
+    if (choice === 1) return 'modify_model';
+    if (choice === 2) return 'modify_runtime';
+    if (choice === 3) return 'modify_custom';
+}
+
+/**
+ * Replay draft edits onto a newly created API.
+ * @returns {{ ok: string[], failed: string[] }}
+ */
+function replayDraftToApi(apiManager, draft, newApi) {
+    const ok = [];
+    const failed = [];
+
+    // Model env vars: only write overridden values
+    for (const k of Object.keys(draft.modelEnvVars || {})) {
+        const v = draft.modelEnvVars[k];
+        const autoV = draft._autoModelEnvVars[k] || '';
+        if (v !== autoV) {
+            try {
+                apiManager.updateModelEnvVar(newApi.id, k, v);
+                ok.push('model/' + k);
+            } catch (e) {
+                failed.push('model/' + k + ': ' + e.message);
+            }
+        }
+    }
+    // Runtime env vars: only write manual values
+    for (const k of Object.keys(draft.runtimeEnvVars || {})) {
+        if ((draft._runtimeEnvSources || {})[k] === 'manual') {
+            try {
+                apiManager.updateRuntimeEnvVar(newApi.id, k, draft.runtimeEnvVars[k]);
+                ok.push('runtime/' + k);
+            } catch (e) {
+                failed.push('runtime/' + k + ': ' + e.message);
+            }
+        }
+    }
+    // Custom env vars
+    for (const [k, v] of Object.entries(draft.customEnvVars || {})) {
+        try {
+            apiManager.setCustomEnvVar(newApi.id, k, v);
+            ok.push('custom/' + k);
+        } catch (e) {
+            failed.push('custom/' + k + ': ' + e.message);
+        }
+    }
+    return { ok, failed };
+}
+
+/**
+ * Add new third-party API — 6-step wizard with state machine.
+ * Step 1: Provider → 2: Base URL → 3: Auth Token → 4: Model → 5: Name → 6: Confirm
+ */
+async function addNewThirdPartyApi() {
+    const { getProvider, getSuggestedModels } = require('./lib/presets/providers');
+    let step = 1;
+    let providerId = null, providerMeta = null;
+    let baseUrl = null, authToken = null, model = null, name = '';
+    let draft = null;
+
+    while (step >= 1 && step <= 6) {
+        switch (step) {
+            case 1: { // Provider
+                screen.render([
+                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '1', '6') + colors.reset, '',
+                ]);
+                const result = await selectProvider({ title: null, showNote: false });
+                if (!result) { step = 0; break; } // Esc = cancel
+                providerId = result.id;
+                providerMeta = getProvider(providerId);
+                baseUrl = null; authToken = null; model = null; name = '';
+                step = 2;
+                break;
+            }
+            case 2: { // Base URL
+                const defaultUrl = providerMeta ? providerMeta.baseUrl || '' : '';
+                screen.render([
+                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '2', '6') + colors.reset, '',
+                ]);
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.field_base_url') + (defaultUrl ? ' [' + defaultUrl + ']' : ''),
+                    { defaultValue: defaultUrl }
+                );
+                if (input === null) { step = 1; break; }
+                baseUrl = input;
+                step = 3;
+                break;
+            }
+            case 3: { // Auth Token
+                screen.render([
+                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '3', '6') + colors.reset, '',
+                ]);
+                const input = await inputStepValue(
+                    i18n.tSync('api.details.token'),
+                    {}
+                );
+                if (input === null) { step = 2; break; }
+                authToken = input;
+                step = 4;
+                break;
+            }
+            case 4: { // Model
+                const suggested = getSuggestedModels(providerId);
+                screen.render([
+                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '4', '6') + colors.reset, '',
+                    suggested.length > 0 ? colors.gray + '  ' + i18n.tSync('add_api.recommended_models') + ': ' + suggested.join(', ') + colors.reset : '',
+                    '',
+                ]);
+                const input = await inputStepValue(
+                    i18n.tSync('api.details.model'),
+                    { defaultValue: suggested.length > 0 ? suggested[0] : '' }
+                );
+                if (input === null) { step = 3; break; }
+                model = input;
+
+                // Duplicate check
+                const dup = apiManager.checkDuplicate(baseUrl, authToken, model);
+                if (dup.isDuplicate) {
+                    const action = await showDuplicateBranch(dup.existing);
+                    if (action === 'enter_existing') {
+                        await editApiEnvVarsById(apiManager, { apiId: dup.existing.id });
+                        return; // done
+                    }
+                    step = 2; break; // go back to modify connection info
+                }
+                step = 5;
+                break;
+            }
+            case 5: { // Name
+                const autoName = providerMeta ? providerMeta.name + ' ' + model : model;
+                screen.render([
+                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '5', '6') + colors.reset, '',
+                ]);
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.field_name'),
+                    { defaultValue: autoName }
+                );
+                if (input === null) { step = 4; break; }
+                name = input;
+                // Build/rebuild draft preserving manual edits if returning from step 6
+                draft = rebuildDraftPreservingOverrides(draft, providerId, baseUrl, authToken, model, name);
+                step = 6;
+                break;
+            }
+            case 6: { // Config confirmation
+                const action = await showConfigConfirmation(draft);
+                if (action === 'finish') {
+                    try {
+                        const newApi = apiManager.addApi(baseUrl, authToken, model, name, providerId);
+                        const replayResult = replayDraftToApi(apiManager, draft, newApi);
+                        if (replayResult.failed.length > 0) {
+                            screen.write(colors.yellow + i18n.tSync('add_api.partial_failure') + colors.reset + '\n');
+                            await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+                            await editApiEnvVarsById(apiManager, { apiId: newApi.id });
+                        } else {
+                            const isFirstApi = apiManager.getApis().length === 1;
+                            showSuccess(await i18n.t('messages.success.api_added'), [
+                                `Name: ${newApi.name}`,
+                                `${await i18n.t('api.details.provider')}: ${resolveProviderName(newApi.provider)}`,
+                                `${await i18n.t('api.details.url')}: ${newApi.baseUrl}`,
+                                `${await i18n.t('api.details.model')}: ${newApi.model}`
+                            ]);
+                            if (isFirstApi) {
+                                showInfo(await i18n.t('messages.info.first_time_usage'));
+                            }
+                        }
+                    } catch (error) {
+                        forceStdinCleanup();
+                        if (error.code === 'DUPLICATE_API') {
+                            const existing = apiManager.config.apis.find(a => a.id === error.existingApiId);
+                            if (existing) {
+                                screen.write(colors.yellow + i18n.tSync('add_api.duplicate_race_lost') + colors.reset + '\n');
+                                const action = await showDuplicateBranch(existing);
+                                if (action === 'enter_existing') {
+                                    await editApiEnvVarsById(apiManager, { apiId: existing.id });
+                                }
+                                return;
+                            }
+                        }
+                        const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
+                        if (error.message === cancelledMessage) {
+                            screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
+                        } else {
+                            showError(await i18n.t('errors.api.failed_add', error.message));
+                        }
+                    }
+                    return; // Exit loop on all paths
+                } else if (action === 'back') {
+                    step = 5; break;
+                } else {
+                    // modify_model, modify_runtime, modify_custom
+                    await editDraftSection(draft, action);
+                    // Loop back to step 6 (confirmation re-renders)
+                }
+                break;
             }
         }
     }
 
-    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+    if (step === 0) {
+        screen.write(colors.yellow + i18n.tSync('messages.info.operation_cancelled') + colors.reset + '\n');
+    }
 }
 
 /**
