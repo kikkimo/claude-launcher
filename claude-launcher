@@ -36,6 +36,7 @@ const Menu = require('./lib/ui/menu');
 const colors = require('./lib/ui/colors');
 const { checkForUpdates, forceCheckForUpdates } = require('./lib/utils/version-checker');
 const {
+    simpleInput,
     waitForKey,
     promptForThirdPartyApi,
     confirmAction,
@@ -53,7 +54,7 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
-const { editApi, editApiById } = require('./lib/ui/api-editor');
+const { editApi, editApiEnvVarsById } = require('./lib/ui/api-editor');
 const i18n = require('./lib/i18n');
 const screen = require('./lib/ui/screen');
 const fs = require('fs');
@@ -230,7 +231,6 @@ async function addNewThirdPartyApi() {
 
         // Check if this is the first API
         const isFirstApi = apiManager.getApis().length === 0;
-        const hasExportPassword = apiManager.hasExportPassword();
 
         const newApi = apiManager.addApi(
             apiData.baseUrl,
@@ -251,6 +251,8 @@ async function addNewThirdPartyApi() {
             showInfo(await i18n.t('messages.info.first_time_usage'));
         }
 
+        await editApiEnvVarsById(apiManager, { apiId: newApi.id });
+
     } catch (error) {
         forceStdinCleanup();
 
@@ -260,7 +262,7 @@ async function addNewThirdPartyApi() {
             screen.write('  [2] ' + i18n.tSync('api.add.cancel') + '\n');
             const choice = await simpleInput('> ');
             if (choice === '1') {
-                await editApiById(apiManager, { apiId: error.existingApiId, initialSection: 'runtimeEnvVars' });
+                await editApiEnvVarsById(apiManager, { apiId: error.existingApiId, initialSection: 'runtimeEnvVars' });
             }
         } else {
             const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
