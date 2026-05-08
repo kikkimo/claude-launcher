@@ -498,25 +498,30 @@ async function showConfigConfirmation(draft) {
     }).length;
     const customCount = Object.keys(draft.customEnvVars).length;
 
-    const versionInfo = colors.bright + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset + '\n'
+    const labelW = 12; // label column width for CJK alignment
+    function fieldLine(label, value) {
+        return '    ' + colors.gray + label.padEnd(labelW) + colors.reset + '  ' + colors.cyan + value + colors.reset + '\n';
+    }
+    const overriddenMark = '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset;
+    const versionInfo = colors.bright + colors.cyan + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset + '\n'
         + '\n'
-        + i18n.tSync('api.edit.field_name') + ': ' + (draft.name || i18n.tSync('status.not_set')) + '\n'
-        + i18n.tSync('api.details.provider') + ': ' + resolveProviderName(draft.provider) + '\n'
-        + i18n.tSync('api.details.url') + ': ' + draft.baseUrl + '\n'
-        + i18n.tSync('api.details.model') + ': ' + draft.model + '\n'
+        + fieldLine(i18n.tSync('api.edit.field_name'), draft.name || i18n.tSync('status.not_set'))
+        + fieldLine(i18n.tSync('api.details.provider'), resolveProviderName(draft.provider))
+        + fieldLine(i18n.tSync('api.details.url'), draft.baseUrl)
+        + fieldLine(i18n.tSync('api.details.model'), draft.model)
         + '\n'
-        + colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset + '\n'
+        + '    ' + colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset + '\n'
         + '\n'
-        + i18n.tSync('page.model_config') + '  ' + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + ' ' + i18n.tSync('status.overridden') + '\n'
-        + i18n.tSync('page.runtime_config') + '  ' + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + ' ' + i18n.tSync('status.overridden') + '\n'
-        + i18n.tSync('page.custom_vars') + '  ' + i18n.tSync('summary.x_items', String(customCount));
+        + '    ' + i18n.tSync('page.model_config') + '    ' + colors.cyan + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + colors.reset + ' ' + overriddenMark + '\n'
+        + '    ' + i18n.tSync('page.runtime_config') + '    ' + colors.cyan + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + colors.reset + ' ' + overriddenMark + '\n'
+        + '    ' + i18n.tSync('page.custom_vars') + '    ' + colors.cyan + i18n.tSync('summary.x_items', String(customCount)) + colors.reset;
 
     menu.setOptions([
         i18n.tSync('action.finish_create'),
         i18n.tSync('page.model_config'),
         i18n.tSync('page.runtime_config'),
         i18n.tSync('page.custom_vars'),
-        i18n.tSync('api.edit.back'),
+        i18n.tSync('action.cancel_config'),
     ]);
     const hintFn = (idx) => {
         if (idx === 0) return i18n.tSync('add_api.finish_hint');
