@@ -498,18 +498,19 @@ async function showConfigConfirmation(draft) {
     }).length;
     const customCount = Object.keys(draft.customEnvVars).length;
 
-    screen.render([
-        '', colors.bright + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset,
-        '', i18n.tSync('api.edit.field_name') + ': ' + (draft.name || i18n.tSync('status.not_set')),
-        i18n.tSync('api.details.provider') + ': ' + resolveProviderName(draft.provider),
-        i18n.tSync('api.details.url') + ': ' + draft.baseUrl,
-        i18n.tSync('api.details.model') + ': ' + draft.model,
-        '', colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset,
-        '', i18n.tSync('page.model_config') + '  ' + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + ' ' + i18n.tSync('status.overridden'),
-        i18n.tSync('page.runtime_config') + '  ' + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + ' ' + i18n.tSync('status.overridden'),
-        i18n.tSync('page.custom_vars') + '  ' + i18n.tSync('summary.x_items', String(customCount)),
-        '', i18n.tSync('action.please_choose'), '',
-    ]);
+    const versionInfo = colors.bright + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset + '\n'
+        + '\n'
+        + i18n.tSync('api.edit.field_name') + ': ' + (draft.name || i18n.tSync('status.not_set')) + '\n'
+        + i18n.tSync('api.details.provider') + ': ' + resolveProviderName(draft.provider) + '\n'
+        + i18n.tSync('api.details.url') + ': ' + draft.baseUrl + '\n'
+        + i18n.tSync('api.details.model') + ': ' + draft.model + '\n'
+        + '\n'
+        + colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset + '\n'
+        + '\n'
+        + i18n.tSync('page.model_config') + '  ' + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + ' ' + i18n.tSync('status.overridden') + '\n'
+        + i18n.tSync('page.runtime_config') + '  ' + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + ' ' + i18n.tSync('status.overridden') + '\n'
+        + i18n.tSync('page.custom_vars') + '  ' + i18n.tSync('summary.x_items', String(customCount));
+
     menu.setOptions([
         i18n.tSync('action.finish_create'),
         i18n.tSync('page.model_config'),
@@ -524,8 +525,8 @@ async function showConfigConfirmation(draft) {
         if (idx === 3) return i18n.tSync('hints.custom.desc');
         return null;
     };
-    const choice = await menu.navigate(null, hintFn);
-    if (choice === -1 || choice === 4) return 'back';
+    const choice = await menu.navigate(versionInfo, hintFn);
+    if (choice === -1 || choice === 4) return 'cancel';
     if (choice === 0) return 'finish';
     if (choice === 1) return 'modify_model';
     if (choice === 2) return 'modify_runtime';
@@ -726,8 +727,8 @@ async function addNewThirdPartyApi() {
                         }
                     }
                     return; // Exit loop on all paths
-                } else if (action === 'back') {
-                    step = 5; break;
+                } else if (action === 'cancel') {
+                    return; // back to main menu
                 } else {
                     // modify_model, modify_runtime, modify_custom
                     await editDraftSection(draft, action);
