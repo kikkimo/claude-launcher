@@ -444,9 +444,11 @@ async function editDraftRuntimeConfig(draft) {
                 await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
             }
         } else {
+            const isEffortLevel = (key === 'CLAUDE_CODE_EFFORT_LEVEL');
+            const extraHints = isEffortLevel ? ['hints.runtime.effort_values'] : [];
             const input = await inputStepValue(
                 i18n.tSync('api.edit.current_value', draft.runtimeEnvVars[key] || i18n.tSync('status.default')),
-                { allowEmpty: true }
+                { allowEmpty: true, hintLines: ['prompt.exit_to_cancel', ...extraHints] }
             );
             if (input === null) continue; // "back"
             try {
