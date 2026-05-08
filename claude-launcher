@@ -228,32 +228,51 @@ let menuOptions = [];
 /**
  * Input helper for add-api steps. Supports Esc / "back" to go back,
  * "exit"/"quit" to cancel, empty input uses defaultValue if provided.
+ * @param {string} promptText
+ * @param {Object} opts
+ * @param {string} opts.defaultValue - fallback when input is empty
+ * @param {boolean} opts.allowEmpty - if true, empty input returns ""
+ * @param {string} opts.stepLabel - step header e.g. "Step 2/6"
+ * @param {string[]} opts.hintLines - i18n keys for hint lines (default: exit + empty_restore)
+ * @param {Function} opts.validate - (value) => { valid, error? }
  * @returns {string|null} - input value, or null to go back
  */
-async function inputStepValue(promptText, { defaultValue, allowEmpty, stepLabel } = {}) {
+async function inputStepValue(promptText, { defaultValue, allowEmpty, stepLabel, hintLines, validate } = {}) {
     const lines = [''];
     if (stepLabel) {
         lines.push(colors.bright + stepLabel + colors.reset);
     }
     lines.push(colors.cyan + promptText + colors.reset);
     lines.push('');
-    lines.push(colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset);
-    lines.push(colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset);
+    const hints = hintLines || ['prompt.exit_to_cancel', 'prompt.empty_to_restore'];
+    for (const h of hints) {
+        lines.push(colors.gray + i18n.tSync(h) + colors.reset);
+    }
     lines.push('');
     screen.render(lines);
-    const input = await simpleInput(colors.green + '> ' + colors.reset);
-    if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
-        const cancelledMsg = await i18n.t('errors.general.cancelled_by_user');
-        throw new Error(cancelledMsg);
+
+    while (true) {
+        const input = await simpleInput(colors.green + '> ' + colors.reset);
+        if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
+            const cancelledMsg = await i18n.t('errors.general.cancelled_by_user');
+            throw new Error(cancelledMsg);
+        }
+        if (input.toLowerCase() === 'back') {
+            return null;
+        }
+        if (input === '') {
+            if (allowEmpty) return '';
+            if (defaultValue !== undefined) return defaultValue;
+        }
+        if (validate) {
+            const result = validate(input);
+            if (!result.valid) {
+                screen.write(colors.red + (result.error || 'Invalid input') + colors.reset + '\n');
+                continue;
+            }
+        }
+        return input;
     }
-    if (input.toLowerCase() === 'back') {
-        return null;
-    }
-    if (input === '') {
-        if (allowEmpty) return '';
-        if (defaultValue !== undefined) return defaultValue;
-    }
-    return input;
 }
 
 /**
@@ -596,7 +615,16 @@ async function addNewThirdPartyApi() {
             case 3: { // Auth Token
                 const input = await inputStepValue(
                     i18n.tSync('api.details.token'),
-                    { stepLabel: i18n.tSync('add_api.step_n_of_m', '3', '6') }
+                    {
+                        stepLabel: i18n.tSync('add_api.step_n_of_m', '3', '6'),
+                        hintLines: ['prompt.exit_to_cancel'],
+                        validate: (v) => {
+                            if (!v || v.trim().length < 10) {
+                                return { valid: false, error: i18n.tSync('errors.api.invalid_token', 'at least 10 characters required') };
+                            }
+                            return { valid: true };
+                        },
+                    }
                 );
                 if (input === null) { step = 2; break; }
                 authToken = input;
