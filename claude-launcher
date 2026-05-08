@@ -587,6 +587,7 @@ async function addNewThirdPartyApi() {
     let baseUrl = null, authToken = null, model = null, name = '';
     let draft = null;
 
+    try {
     while (step >= 1 && step <= 6) {
         switch (step) {
             case 1: { // Provider
@@ -739,6 +740,20 @@ async function addNewThirdPartyApi() {
 
     if (step === 0) {
         screen.write(colors.yellow + i18n.tSync('messages.info.operation_cancelled') + colors.reset + '\n');
+    }
+    } catch (error) {
+        forceStdinCleanup();
+        const cancelledMsg = i18n.tSync('errors.general.cancelled_by_user');
+        if (error.message === cancelledMsg) {
+            screen.write(colors.yellow + i18n.tSync('messages.info.operation_cancelled') + colors.reset + '\n');
+        } else if (error.code === 'DUPLICATE_API') {
+            const existing = apiManager.config.apis.find(a => a.id === error.existingApiId);
+            if (existing) {
+                screen.write(colors.yellow + i18n.tSync('add_api.duplicate_race_lost') + colors.reset + '\n');
+            }
+        } else {
+            screen.write(colors.red + error.message + colors.reset + '\n');
+        }
     }
 }
 
