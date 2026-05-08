@@ -223,6 +223,16 @@ function validateImportFile(filePath) {
 // Main menu options - will be populated dynamically with i18n
 let menuOptions = [];
 
+/**
+ * Resolve a config label via i18n first, fall back to constant map.
+ */
+function i18nLabel(section, key, fallbackMap) {
+    const i18nKey = 'config_labels.' + section + '.' + key;
+    const val = i18n.tSync(i18nKey);
+    if (val !== i18nKey) return val;
+    return fallbackMap[key] || key;
+}
+
 // --- Add API flow helpers ---
 
 /**
@@ -333,7 +343,7 @@ async function editDraftModelConfig(draft) {
     const menu = new Menu();
     const { PREDEFINED_MODEL_ENV_KEYS } = require('./lib/validators');
     const { MODEL_CONFIG_LABELS } = require('./lib/api-manager');
-    const getLabel = (key) => MODEL_CONFIG_LABELS[key] || key;
+    const getLabel = (key) => i18nLabel("model", key, MODEL_CONFIG_LABELS);
 
     while (true) {
         const options = PREDEFINED_MODEL_ENV_KEYS.map((key) => {
@@ -391,7 +401,7 @@ async function editDraftRuntimeConfig(draft) {
     const menu = new Menu();
     const { PREDEFINED_RUNTIME_KEYS, TYPE_A_FIELDS, TYPE_B_FIELDS } = require('./lib/validators');
     const { RUNTIME_CONFIG_LABELS } = require('./lib/api-manager');
-    const getLabel = (key) => RUNTIME_CONFIG_LABELS[key] || key;
+    const getLabel = (key) => i18nLabel("runtime", key, RUNTIME_CONFIG_LABELS);
 
     while (true) {
         const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
