@@ -672,7 +672,10 @@ async function addNewThirdPartyApi() {
                 break;
             }
             case 5: { // Name
-                const autoName = providerMeta ? providerMeta.name + ' ' + model : model;
+                const sameProviderCount = apiManager.config.apis.filter(a => a.provider === providerId).length;
+                const fullName = resolveProviderName(providerId);
+                const providerShortName = fullName.split(' (')[0].split(' -')[0];
+                const autoName = providerShortName + ' #' + (sameProviderCount + 1);
                 const input = await inputStepValue(
                     i18n.tSync('api.edit.field_name'),
                     { defaultValue: autoName, stepLabel: i18n.tSync('add_api.step_n_of_m', '5', '6') }
