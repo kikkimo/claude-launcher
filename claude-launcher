@@ -499,6 +499,9 @@ async function showConfigConfirmation(draft) {
     ]);
     const hintFn = (idx) => {
         if (idx === 0) return i18n.tSync('add_api.finish_hint');
+        if (idx === 1) return i18n.tSync('hints.model.desc');
+        if (idx === 2) return i18n.tSync('hints.runtime.desc');
+        if (idx === 3) return i18n.tSync('hints.custom.desc');
         return null;
     };
     const choice = await menu.navigate(null, hintFn);
