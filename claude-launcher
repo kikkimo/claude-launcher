@@ -230,15 +230,17 @@ let menuOptions = [];
  * "exit"/"quit" to cancel, empty input uses defaultValue if provided.
  * @returns {string|null} - input value, or null to go back
  */
-async function inputStepValue(promptText, { defaultValue, allowEmpty } = {}) {
-    screen.render([
-        '',
-        colors.cyan + promptText + colors.reset,
-        '',
-        colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset,
-        colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset,
-        '',
-    ]);
+async function inputStepValue(promptText, { defaultValue, allowEmpty, stepLabel } = {}) {
+    const lines = [''];
+    if (stepLabel) {
+        lines.push(colors.bright + stepLabel + colors.reset);
+    }
+    lines.push(colors.cyan + promptText + colors.reset);
+    lines.push('');
+    lines.push(colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset);
+    lines.push(colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset);
+    lines.push('');
+    screen.render(lines);
     const input = await simpleInput(colors.green + '> ' + colors.reset);
     if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
         const cancelledMsg = await i18n.t('errors.general.cancelled_by_user');
@@ -565,10 +567,10 @@ async function addNewThirdPartyApi() {
     while (step >= 1 && step <= 6) {
         switch (step) {
             case 1: { // Provider
-                screen.render([
-                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '1', '6') + colors.reset, '',
-                ]);
-                const result = await selectProvider({ title: null, showNote: false });
+                const result = await selectProvider({
+                    title: i18n.tSync('add_api.step_n_of_m', '1', '6'),
+                    showNote: true,
+                });
                 if (!result) { step = 0; break; } // Esc = cancel
                 providerId = result.id;
                 providerMeta = getProvider(providerId);
@@ -578,12 +580,9 @@ async function addNewThirdPartyApi() {
             }
             case 2: { // Base URL
                 const defaultUrl = providerMeta ? providerMeta.baseUrl || '' : '';
-                screen.render([
-                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '2', '6') + colors.reset, '',
-                ]);
                 const input = await inputStepValue(
                     i18n.tSync('api.edit.field_base_url') + (defaultUrl ? ' [' + defaultUrl + ']' : ''),
-                    { defaultValue: defaultUrl }
+                    { defaultValue: defaultUrl, stepLabel: i18n.tSync('add_api.step_n_of_m', '2', '6') }
                 );
                 if (input === null) { step = 1; break; }
                 baseUrl = input;
@@ -591,12 +590,9 @@ async function addNewThirdPartyApi() {
                 break;
             }
             case 3: { // Auth Token
-                screen.render([
-                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '3', '6') + colors.reset, '',
-                ]);
                 const input = await inputStepValue(
                     i18n.tSync('api.details.token'),
-                    {}
+                    { stepLabel: i18n.tSync('add_api.step_n_of_m', '3', '6') }
                 );
                 if (input === null) { step = 2; break; }
                 authToken = input;
@@ -605,17 +601,28 @@ async function addNewThirdPartyApi() {
             }
             case 4: { // Model
                 const suggested = getSuggestedModels(providerId);
-                screen.render([
-                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '4', '6') + colors.reset, '',
-                    suggested.length > 0 ? colors.gray + '  ' + i18n.tSync('add_api.recommended_models') + ': ' + suggested.join(', ') + colors.reset : '',
-                    '',
-                ]);
-                const input = await inputStepValue(
-                    i18n.tSync('api.details.model'),
-                    { defaultValue: suggested.length > 0 ? suggested[0] : '' }
-                );
-                if (input === null) { step = 3; break; }
-                model = input;
+                const hintLines = suggested.length > 0
+                    ? ['', colors.gray + '  ' + i18n.tSync('add_api.recommended_models') + ': ' + suggested.join(', ') + colors.reset, '']
+                    : ['', ''];
+                const fullPrompt = i18n.tSync('api.details.model');
+                const lines = [''];
+                lines.push(colors.bright + i18n.tSync('add_api.step_n_of_m', '4', '6') + colors.reset);
+                lines.push(colors.cyan + fullPrompt + colors.reset);
+                lines.push(...hintLines);
+                lines.push(colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset);
+                lines.push(colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset);
+                lines.push('');
+                screen.render(lines);
+                const input = await simpleInput(colors.green + '> ' + colors.reset);
+                if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
+                    throw new Error(await i18n.t('errors.general.cancelled_by_user'));
+                }
+                if (input.toLowerCase() === 'back') { step = 3; break; }
+                if (input === '' && suggested.length > 0) {
+                    model = suggested[0];
+                } else {
+                    model = input;
+                }
 
                 // Duplicate check
                 const dup = apiManager.checkDuplicate(baseUrl, authToken, model);
@@ -632,12 +639,9 @@ async function addNewThirdPartyApi() {
             }
             case 5: { // Name
                 const autoName = providerMeta ? providerMeta.name + ' ' + model : model;
-                screen.render([
-                    '', colors.bright + i18n.tSync('add_api.step_n_of_m', '5', '6') + colors.reset, '',
-                ]);
                 const input = await inputStepValue(
                     i18n.tSync('api.edit.field_name'),
-                    { defaultValue: autoName }
+                    { defaultValue: autoName, stepLabel: i18n.tSync('add_api.step_n_of_m', '5', '6') }
                 );
                 if (input === null) { step = 4; break; }
                 name = input;
