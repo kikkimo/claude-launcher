@@ -362,7 +362,20 @@ async function editDraftModelConfig(draft) {
         });
         options.push(i18n.tSync('api.edit.back'));
         menu.setOptions(options);
-        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+        const modelHintFn = (idx) => {
+            if (idx >= PREDEFINED_MODEL_ENV_KEYS.length) return null;
+            const k = PREDEFINED_MODEL_ENV_KEYS[idx];
+            const dk = {
+                ANTHROPIC_DEFAULT_SONNET_MODEL: 'hints.model.sonnet_detail',
+                ANTHROPIC_DEFAULT_OPUS_MODEL: 'hints.model.opus_detail',
+                ANTHROPIC_DEFAULT_HAIKU_MODEL: 'hints.model.haiku_detail',
+                CLAUDE_CODE_SUBAGENT_MODEL: 'hints.model.subagent_detail',
+                ANTHROPIC_CUSTOM_MODEL_OPTION: 'hints.model.custom_option_detail',
+                ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'hints.model.custom_name_detail',
+            };
+            return dk[k] ? i18n.tSync(dk[k]) : null;
+        };
+        const choice = await menu.navigate(null, modelHintFn, 'navigation.enter_to_edit');
 
         if (choice === -1 || choice === PREDEFINED_MODEL_ENV_KEYS.length) return;
 
@@ -446,7 +459,31 @@ async function editDraftRuntimeConfig(draft) {
         });
         options.push(i18n.tSync('api.edit.back'));
         menu.setOptions(options);
-        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+        const runtimeHintFn = (idx) => {
+            if (idx >= runtimeKeys.length) return null;
+            const k = runtimeKeys[idx];
+            const dk = {
+                API_TIMEOUT_MS: 'hints.runtime.timeout_detail',
+                CLAUDE_CODE_ATTRIBUTION_HEADER: 'hints.runtime.attribution_detail',
+                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 'hints.runtime.nonessential_detail',
+                CLAUDE_CODE_EFFORT_LEVEL: 'hints.runtime.effort_detail',
+                CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: 'hints.runtime.experimental_detail',
+                CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: 'hints.runtime.nonstreaming_detail',
+            };
+            if (!dk[k]) return null;
+            const val = draft.runtimeEnvVars[k] || '';
+            const isManual = (draft._runtimeEnvSources || {})[k] === 'manual';
+            let sourceText;
+            if (isManual && val !== '') {
+                sourceText = i18n.tSync('hints.runtime.source_manual');
+            } else if (providerDefaults[k] !== undefined) {
+                sourceText = i18n.tSync('hints.runtime.source_provider');
+            } else {
+                sourceText = i18n.tSync('hints.runtime.source_default');
+            }
+            return i18n.tSync(dk[k]) + '\n' + sourceText;
+        };
+        const choice = await menu.navigate(null, runtimeHintFn, 'navigation.enter_to_edit');
 
         if (choice === -1 || choice === runtimeKeys.length) return;
 
