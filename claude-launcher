@@ -579,17 +579,26 @@ async function showConfigConfirmation(draft) {
     }).length;
     const customCount = Object.keys(draft.customEnvVars).length;
 
-    const labelW = 12; // label column width for CJK alignment
+    const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+    const fieldLabels = [
+        i18n.tSync('api.edit.field_name'), i18n.tSync('api.details.provider'),
+        i18n.tSync('api.details.url'), i18n.tSync('api.details.model'),
+    ];
+    const labelW = Math.max(...fieldLabels.map(l => getStringWidth(l)));
+    const fieldValues = [
+        draft.name || i18n.tSync('status.not_set'), resolveProviderName(draft.provider),
+        draft.baseUrl, draft.model,
+    ];
     function fieldLine(label, value) {
-        return '    ' + colors.gray + label.padEnd(labelW) + colors.reset + '  ' + colors.cyan + value + colors.reset + '\n';
+        return '    ' + colors.gray + padStringToWidth(label, labelW) + colors.reset + '  ' + colors.cyan + value + colors.reset + '\n';
     }
     const overriddenMark = '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset;
     const versionInfo = colors.bright + colors.cyan + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset + '\n'
         + '\n'
-        + fieldLine(i18n.tSync('api.edit.field_name'), draft.name || i18n.tSync('status.not_set'))
-        + fieldLine(i18n.tSync('api.details.provider'), resolveProviderName(draft.provider))
-        + fieldLine(i18n.tSync('api.details.url'), draft.baseUrl)
-        + fieldLine(i18n.tSync('api.details.model'), draft.model)
+        + fieldLine(fieldLabels[0], fieldValues[0])
+        + fieldLine(fieldLabels[1], fieldValues[1])
+        + fieldLine(fieldLabels[2], fieldValues[2])
+        + fieldLine(fieldLabels[3], fieldValues[3])
         + '\n'
         + '    ' + colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset + '\n'
         + '\n'
