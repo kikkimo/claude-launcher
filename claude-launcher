@@ -721,10 +721,14 @@ async function addNewThirdPartyApi() {
                 break;
             }
             case 5: { // Name
-                const sameProviderCount = apiManager.config.apis.filter(a => a.provider === providerId).length;
                 const fullName = resolveProviderName(providerId);
                 const providerShortName = fullName.split(' (')[0].split(' -')[0];
-                const autoName = providerShortName + ' #' + (sameProviderCount + 1);
+                // Count APIs sharing the same short-name prefix (handles moonshot / kimi_for_coding)
+                const sameNameCount = apiManager.config.apis.filter(a => {
+                    const aFull = resolveProviderName(a.provider);
+                    return aFull.split(' (')[0].split(' -')[0] === providerShortName;
+                }).length;
+                const autoName = providerShortName + ' #' + (sameNameCount + 1);
                 const input = await inputStepValue(
                     i18n.tSync('api.edit.field_name'),
                     { defaultValue: autoName, stepLabel: i18n.tSync('add_api.step_n_of_m', '5', '6') }
