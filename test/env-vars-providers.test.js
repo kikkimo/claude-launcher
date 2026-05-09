@@ -102,16 +102,14 @@ test('deepseek template: flash model → all flash', () => {
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash[1m]');
 });
-test('anthropic template: all 7 fields = selected model', () => {
+test('anthropic template: tier-based assignment (sonnet selected)', () => {
     const v = getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-4-6');
-    const m = 'claude-sonnet-4-6';
-    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, m);
-    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME, m);
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, m);
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, m);
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, m);
-    assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, m);
-    assert.strictEqual(v.smallFastModel, m);
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'claude-sonnet-4-6');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-4-6');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-4-7');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku-4-5-20251001');
+    assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5-20251001');
+    assert.strictEqual(v.smallFastModel, 'claude-haiku-4-5-20251001');
 });
 
 console.log(`\nTask 2: ${passed} passed, ${failed} failed`);
