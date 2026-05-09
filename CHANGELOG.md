@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-05-09
+
+### Added
+- **6-Step Add API Wizard**: Multi-step wizard (Provider → URL → Token → Model → Name → Confirm) with state machine. Esc/back navigation between steps, pre-create duplicate detection with branch UI, draft editing before persistence, and race-condition handling at persist time.
+- **Draft Layer**: `buildApiDraft()` / `applyDraftEnvChange()` / `deleteDraftCustomEnvVar()` static methods on `ApiManager` for pre-persist config editing without touching disk.
+- **Model Tier Auto-Matching**: Same-generation tier templates for all 9 providers — Anthropic auto-detects Opus/Sonnet/Haiku from model list; DeepSeek maps pro→flash; GLM maps 5.1→5-turbo; Moonshot maps k2.6→k2-thinking-turbo; MiniMax maps M2.x→M2.x-highspeed. Subagent defaults to Haiku tier (per Anthropic recommendation).
+- **Provider Default Values**: All 9 providers now carry runtime env defaults (`API_TIMEOUT_MS`, `CLAUDE_CODE_ATTRIBUTION_HEADER: '0'`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'`, etc.). DeepSeek defaults `CLAUDE_CODE_EFFORT_LEVEL` to `max`. Moonshot/Kimi/MiniMax/GLM default `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1'`.
+- **Comprehensive Hint System**: 12 field-level `_detail` hints across all 11 locales — each shows field description + corresponding env var `[KEY]` + dynamic value source (provider default / manual / built-in default). Both list pages and edit sub-pages covered.
+- **New i18n Sections**: `page`, `action`, `prompt`, `add_api`, `summary`, `confirm`, `config_labels.model/runtime` — ~50 new keys across all 11 languages.
+- **New i18n Keys**: `hints.model.*_detail`, `hints.runtime.*_detail`, `hints.runtime.source_*`, `hints.runtime.effort_values`, `action.cancel_config`, `add_api.confirm_page_prompt`, `errors.api.not_found`, `status.auto`, `config.values.recommended_on`, `navigation.enter_to_edit/select`, `navigation.input_1_to_n_or_q`, `navigation.invalid_selection`.
+- **Menu Component** `navigationKey` param + `_navigationKey` cache passed through all redraws. Non-TTY fallback now renders numbered prefixes (`1.`, `2.`) and i18n prompts. `selectFromList()` prompts i18n'd.
+
+### Changed
+- **Runtime Config Display**: "Default" replaced with actual provider values (e.g. `600000`, `0`, `max`). TYPE_A `'1'` shown as "Enabled", `'off'` as "Disabled". Fields without provider default shown as `(not set)` via new `status.auto` key.
+- **Config Label i18n**: `i18nLabel()` helper resolves `config_labels.<section>.<key>` lookup before falling back to English constants. Labels now follow user locale.
+- **Edit API Menu**: 3 env entries merged into single "Model & Runtime Config" entry with summary counts (7→5 items). Sub-pages restructured as 3-section home with per-section hints.
+- **Model/Runtime List Pages**: Dynamic column alignment via `getStringWidth()`/`padStringToWidth()` instead of hardcoded `padEnd(24)`. Labels align correctly in all languages.
+- **Experimental Features Label**: All 11 locales updated from ambiguous "Experimental Features" to "Disable Experimental Features" matching `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` semantics.
+- **noFlicker Default**: Now defaults to `true` (On, recommended) matching telemetry's default pattern. Added `config.values.recommended_on` key.
+- **API Default Name**: Simplified from `"Provider Name model-name"` to `"ProviderShort #N"` with auto-increment counting by short-name prefix (moonshot + kimi_for_coding share "Moonshot AI" prefix).
+
+### Fixed
+- **Confirmation Page Rendering**: Content passed via `versionInfo` parameter to Menu instead of `screen.render()` that was immediately overwritten by `displayMenu()`.
+- **Confirmation Page Back Button**: Changed from "Back" to "Cancel" (`action.cancel_config`) — exits to main menu without saving.
+- **Token Input**: Removed misleading "empty to restore recommended" hint; added minimum 10-character validation.
+- **Exit Handling**: `addNewThirdPartyApi` state machine wrapped in try-catch so `exit` at any step returns to main menu gracefully.
+- **Locale File Structure**: Fixed `nonstreaming` key having `},` on the same line, premature `runtime` section closure causing `source_*` keys to land at wrong nesting level.
+
 ## [3.0.0] - 2026-04-07
 
 ### Added

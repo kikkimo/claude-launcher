@@ -36,12 +36,14 @@ const Menu = require('./lib/ui/menu');
 const colors = require('./lib/ui/colors');
 const { checkForUpdates, forceCheckForUpdates } = require('./lib/utils/version-checker');
 const {
+    simpleInput,
     waitForKey,
     promptForThirdPartyApi,
     confirmAction,
     showSuccess,
     showError,
-    showInfo
+    showInfo,
+    selectProvider,
 } = require('./lib/ui/prompts');
 const {
     launchClaudeDefault,
@@ -53,7 +55,8 @@ const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
-const { editApi } = require('./lib/ui/api-editor');
+const { editApi, editApiEnvVarsById, resolveProviderName } = require('./lib/ui/api-editor');
+const { i18nLabel } = require('./lib/ui/i18n-labels');
 const i18n = require('./lib/i18n');
 const screen = require('./lib/ui/screen');
 const fs = require('fs');
@@ -221,52 +224,631 @@ function validateImportFile(filePath) {
 // Main menu options - will be populated dynamically with i18n
 let menuOptions = [];
 
+// --- Add API flow helpers ---
+
 /**
- * Add new third-party API
+ * Input helper for add-api steps. Supports Esc / "back" to go back,
+ * "exit"/"quit" to cancel, empty input uses defaultValue if provided.
+ * @param {string} promptText
+ * @param {Object} opts
+ * @param {string} opts.defaultValue - fallback when input is empty
+ * @param {boolean} opts.allowEmpty - if true, empty input returns ""
+ * @param {string} opts.stepLabel - step header e.g. "Step 2/6"
+ * @param {string[]} opts.hintLines - i18n keys for hint lines (default: exit + empty_restore)
+ * @param {Function} opts.validate - (value) => { valid, error? }
+ * @returns {string|null} - input value, or null to go back
+ */
+async function inputStepValue(promptText, { defaultValue, allowEmpty, stepLabel, hintLines, validate } = {}) {
+    const lines = [''];
+    if (stepLabel) {
+        lines.push(colors.bright + stepLabel + colors.reset);
+    }
+    lines.push(colors.cyan + promptText + colors.reset);
+    lines.push('');
+    const hints = hintLines || ['prompt.exit_to_cancel', 'prompt.empty_to_restore'];
+    for (const h of hints) {
+        lines.push(colors.gray + i18n.tSync(h) + colors.reset);
+    }
+    lines.push('');
+    screen.render(lines);
+
+    while (true) {
+        const input = await simpleInput(colors.green + '> ' + colors.reset);
+        if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
+            const cancelledMsg = await i18n.t('errors.general.cancelled_by_user');
+            throw new Error(cancelledMsg);
+        }
+        if (input.toLowerCase() === 'back') {
+            return null;
+        }
+        if (input === '') {
+            if (allowEmpty) return '';
+            if (defaultValue !== undefined) return defaultValue;
+        }
+        if (validate) {
+            const result = validate(input);
+            if (!result.valid) {
+                screen.write(colors.red + (result.error || 'Invalid input') + colors.reset + '\n');
+                continue;
+            }
+        }
+        return input;
+    }
+}
+
+/**
+ * Rebuild draft after user goes back and re-enters connection info.
+ * Preserves manual overrides from oldDraft for model/runtime/custom sections.
+ */
+function rebuildDraftPreservingOverrides(oldDraft, providerId, baseUrl, authToken, model, name) {
+    const draft = ApiManager.buildApiDraft(providerId, baseUrl, authToken, model, name);
+    if (!oldDraft) return draft;
+
+    // Preserve model overrides: if user set a value different from auto, keep it
+    const oldAuto = oldDraft._autoModelEnvVars || {};
+    for (const k of Object.keys(oldDraft.modelEnvVars || {})) {
+        if (oldDraft.modelEnvVars[k] !== oldAuto[k]) {
+            draft.modelEnvVars[k] = oldDraft.modelEnvVars[k];
+        }
+    }
+    // Preserve runtime manual overrides
+    const oldRtSources = oldDraft._runtimeEnvSources || {};
+    for (const k of Object.keys(oldRtSources)) {
+        if (oldRtSources[k] === 'manual') {
+            draft.runtimeEnvVars[k] = oldDraft.runtimeEnvVars[k];
+            draft._runtimeEnvSources[k] = 'manual';
+        }
+    }
+    // Preserve custom vars
+    draft.customEnvVars = { ...(oldDraft.customEnvVars || {}) };
+    return draft;
+}
+
+/**
+ * Show duplicate API branch: enter existing config or go back.
+ * @returns {'enter_existing'|'go_back'}
+ */
+async function showDuplicateBranch(existingApi) {
+    const menu = new Menu();
+    screen.render([
+        '', colors.yellow + i18n.tSync('add_api.duplicate_title') + colors.reset, '',
+        i18n.tSync('api.edit.field_name') + ': ' + existingApi.name,
+        i18n.tSync('api.details.provider') + ': ' + resolveProviderName(existingApi.provider),
+        i18n.tSync('api.details.url') + ': ' + existingApi.baseUrl,
+        i18n.tSync('api.details.model') + ': ' + existingApi.model,
+        '', colors.gray + i18n.tSync('add_api.duplicate_draft_discarded') + colors.reset, '',
+        i18n.tSync('action.please_choose'), '',
+    ]);
+    menu.setOptions([
+        i18n.tSync('add_api.duplicate_enter_config'),
+        i18n.tSync('add_api.duplicate_back'),
+    ]);
+    const choice = await menu.navigate();
+    if (choice === 0) return 'enter_existing';
+    return 'go_back';
+}
+
+// --- Draft editing sub-pages (no persistence, operate on draft object) ---
+
+async function editDraftModelConfig(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('./lib/validators');
+    const { MODEL_CONFIG_LABELS } = require('./lib/api-manager');
+    const getLabel = (key) => i18nLabel("model", key, MODEL_CONFIG_LABELS);
+
+    while (true) {
+        const rows = PREDEFINED_MODEL_ENV_KEYS.map((key) => {
+            const currentVal = draft.modelEnvVars[key] || '';
+            const autoVal = draft._autoModelEnvVars[key] || '';
+            const displayVal = currentVal || autoVal || i18n.tSync('status.not_set');
+            const isOverridden = autoVal !== '' && currentVal !== autoVal;
+            const mark = isOverridden ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
+            return { label: '  ' + getLabel(key), displayVal, mark };
+        });
+        const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+        const maxLabelW = Math.max(...rows.map(r => getStringWidth(r.label)));
+        const maxValueW = Math.max(...rows.map(r => getStringWidth(r.displayVal)));
+        const options = rows.map(r => {
+            return colors.reset + padStringToWidth(r.label, maxLabelW + 2) + '  ' + padStringToWidth(r.displayVal, maxValueW) + r.mark;
+        });
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const modelHintFn = (idx) => {
+            if (idx >= PREDEFINED_MODEL_ENV_KEYS.length) return null;
+            const k = PREDEFINED_MODEL_ENV_KEYS[idx];
+            const dk = {
+                ANTHROPIC_DEFAULT_SONNET_MODEL: 'hints.model.sonnet_detail',
+                ANTHROPIC_DEFAULT_OPUS_MODEL: 'hints.model.opus_detail',
+                ANTHROPIC_DEFAULT_HAIKU_MODEL: 'hints.model.haiku_detail',
+                CLAUDE_CODE_SUBAGENT_MODEL: 'hints.model.subagent_detail',
+                ANTHROPIC_CUSTOM_MODEL_OPTION: 'hints.model.custom_option_detail',
+                ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'hints.model.custom_name_detail',
+            };
+            return dk[k] ? i18n.tSync(dk[k]) : null;
+        };
+        const choice = await menu.navigate(null, modelHintFn, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === PREDEFINED_MODEL_ENV_KEYS.length) return;
+
+        const key = PREDEFINED_MODEL_ENV_KEYS[choice];
+        const autoVal = draft._autoModelEnvVars[key] || '';
+        const label = getLabel(key);
+        const subMenu = new Menu();
+        let inSub = true;
+        while (inSub) {
+            const currentVal = draft.modelEnvVars[key] || '';
+            screen.render([
+                '', colors.cyan + label + colors.reset, '',
+                i18n.tSync('status.current_value') + ': ' + (currentVal || i18n.tSync('status.not_set')),
+                i18n.tSync('status.recommended_value') + ': ' + (autoVal || i18n.tSync('status.not_set')),
+                '', i18n.tSync('action.please_choose'), '',
+            ]);
+            subMenu.setOptions([
+                i18n.tSync('action.follow_recommended'),
+                i18n.tSync('action.custom_input'),
+                i18n.tSync('api.edit.back'),
+            ]);
+            const subChoice = await subMenu.navigate(null, null);
+            if (subChoice === -1 || subChoice === 2) { inSub = false; break; }
+            if (subChoice === 0) {
+                draft.modelEnvVars[key] = autoVal;
+                inSub = false;
+            } else if (subChoice === 1) {
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.current_value', currentVal),
+                    { allowEmpty: true }
+                );
+                if (input === null) continue; // "back"
+                draft.modelEnvVars[key] = (input === '') ? autoVal : input;
+                inSub = false;
+            }
+        }
+    }
+}
+
+async function editDraftRuntimeConfig(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_RUNTIME_KEYS, TYPE_A_FIELDS, TYPE_B_FIELDS } = require('./lib/validators');
+    const { RUNTIME_CONFIG_LABELS } = require('./lib/api-manager');
+    const { getProvider } = require('./lib/presets/providers');
+    const getLabel = (key) => i18nLabel("runtime", key, RUNTIME_CONFIG_LABELS);
+    const providerConfig = getProvider(draft.provider);
+    const providerDefaults = providerConfig ? providerConfig.envVars || {} : {};
+
+    while (true) {
+        const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
+        const rows = runtimeKeys.map(key => {
+            const val = draft.runtimeEnvVars[key] || '';
+            const providerVal = providerDefaults[key];
+            let display;
+            if (val === '') {
+                if (providerVal !== undefined) {
+                    if (TYPE_A_FIELDS.includes(key) && providerVal === '1') {
+                        display = i18n.tSync('status.enabled');
+                    } else {
+                        display = providerVal;
+                    }
+                } else {
+                    display = i18n.tSync('status.auto');
+                }
+            } else if (TYPE_A_FIELDS.includes(key) && val === 'off') {
+                display = i18n.tSync('status.disabled');
+            } else if (TYPE_A_FIELDS.includes(key) && val === '1') {
+                display = i18n.tSync('status.enabled');
+            } else {
+                display = val;
+            }
+            const isManual = (draft._runtimeEnvSources || {})[key] === 'manual';
+            const mark = isManual ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
+            return { label: '  ' + getLabel(key), display, mark };
+        });
+        const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+        const maxLabelW = Math.max(...rows.map(r => getStringWidth(r.label)));
+        const maxValueW = Math.max(...rows.map(r => getStringWidth(r.display)));
+        const options = rows.map(r => {
+            return colors.reset + padStringToWidth(r.label, maxLabelW + 2) + '  ' + padStringToWidth(r.display, maxValueW) + r.mark;
+        });
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const runtimeHintFn = (idx) => {
+            if (idx >= runtimeKeys.length) return null;
+            const k = runtimeKeys[idx];
+            const dk = {
+                API_TIMEOUT_MS: 'hints.runtime.timeout_detail',
+                CLAUDE_CODE_ATTRIBUTION_HEADER: 'hints.runtime.attribution_detail',
+                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 'hints.runtime.nonessential_detail',
+                CLAUDE_CODE_EFFORT_LEVEL: 'hints.runtime.effort_detail',
+                CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: 'hints.runtime.experimental_detail',
+                CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: 'hints.runtime.nonstreaming_detail',
+            };
+            if (!dk[k]) return null;
+            const val = draft.runtimeEnvVars[k] || '';
+            const isManual = (draft._runtimeEnvSources || {})[k] === 'manual';
+            let sourceText;
+            if (isManual && val !== '') {
+                sourceText = i18n.tSync('hints.runtime.source_manual');
+            } else if (providerDefaults[k] !== undefined) {
+                sourceText = i18n.tSync('hints.runtime.source_provider');
+            } else {
+                sourceText = i18n.tSync('hints.runtime.source_default');
+            }
+            return i18n.tSync(dk[k]) + '\n' + sourceText;
+        };
+        const choice = await menu.navigate(null, runtimeHintFn, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === runtimeKeys.length) return;
+
+        const key = runtimeKeys[choice];
+        if (TYPE_A_FIELDS.includes(key) || TYPE_B_FIELDS.includes(key)) {
+            const values = TYPE_A_FIELDS.includes(key) ? ['', '1', 'off'] : ['', '1', '0'];
+            try {
+                const v = draft.runtimeEnvVars[key] || '';
+                const idx = values.indexOf(v);
+                const next = values[(idx + 1) % values.length];
+                ApiManager.applyDraftEnvChange(draft, 'runtime', key, next);
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+            }
+        } else {
+            const isEffortLevel = (key === 'CLAUDE_CODE_EFFORT_LEVEL');
+            const extraHints = isEffortLevel ? ['hints.runtime.effort_values'] : [];
+            const draftVal = draft.runtimeEnvVars[key] || '';
+            const draftProvVal = providerDefaults[key];
+            const draftDisplayVal = draftVal || draftProvVal || i18n.tSync('status.auto');
+            const input = await inputStepValue(
+                i18n.tSync('api.edit.current_value', draftDisplayVal),
+                { allowEmpty: true, hintLines: ['prompt.exit_to_cancel', ...extraHints] }
+            );
+            if (input === null) continue; // "back"
+            try {
+                ApiManager.applyDraftEnvChange(draft, 'runtime', key, input === '' ? '' : input);
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+            }
+        }
+    }
+}
+
+async function editDraftCustomVars(draft) {
+    const menu = new Menu();
+    while (true) {
+        const keys = Object.keys(draft.customEnvVars || {});
+        const options = keys.length > 0
+            ? keys.map(k => '  ' + k + ' = ' + draft.customEnvVars[k])
+            : [colors.gray + i18n.tSync('api.edit.no_custom_vars') + colors.reset];
+        options.push(i18n.tSync('action.add_variable'));
+        options.push(i18n.tSync('api.edit.back'));
+        menu.setOptions(options);
+        const choice = await menu.navigate(null, null, 'navigation.enter_to_edit');
+
+        if (choice === -1 || choice === options.length - 1) return;
+        if (choice === options.length - 2) {
+            const keyInput = await inputStepValue(i18n.tSync('api.edit.enter_custom_key'), { allowEmpty: false });
+            if (!keyInput || keyInput === null) continue;
+            const valInput = await inputStepValue(i18n.tSync('api.edit.enter_custom_value'), { allowEmpty: true });
+            if (valInput === null) continue;
+            try {
+                ApiManager.applyDraftEnvChange(draft, 'custom', keyInput, valInput || '');
+            } catch (e) {
+                screen.write(colors.red + e.message + colors.reset + '\n');
+                await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+            }
+        } else if (choice < keys.length) {
+            const key = keys[choice];
+            screen.render(['', colors.yellow + i18n.tSync('confirm.delete_variable') + colors.reset]);
+            const confirm = await simpleInput('> ');
+            if (confirm.toLowerCase() === 'y') {
+                ApiManager.deleteDraftCustomEnvVar(draft, key);
+            }
+        }
+    }
+}
+
+async function editDraftSection(draft, section) {
+    if (section === 'modify_model') await editDraftModelConfig(draft);
+    else if (section === 'modify_runtime') await editDraftRuntimeConfig(draft);
+    else if (section === 'modify_custom') await editDraftCustomVars(draft);
+}
+
+/**
+ * Show config confirmation page (step 6).
+ * @returns {'finish'|'back'|'modify_model'|'modify_runtime'|'modify_custom'}
+ */
+async function showConfigConfirmation(draft) {
+    const menu = new Menu();
+    const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('./lib/validators');
+    const modelOverridden = PREDEFINED_MODEL_ENV_KEYS.filter(k => {
+        const v = draft.modelEnvVars[k] || '';
+        const a = draft._autoModelEnvVars[k];
+        return a !== undefined && v !== a;
+    }).length;
+    const runtimeOverridden = PREDEFINED_RUNTIME_KEYS.filter(k => {
+        const val = (draft.runtimeEnvVars || {})[k] || '';
+        return val !== '';
+    }).length;
+    const customCount = Object.keys(draft.customEnvVars).length;
+
+    const { getStringWidth, padStringToWidth } = require('./lib/utils/string-width');
+    const fieldLabels = [
+        i18n.tSync('api.edit.field_name'), i18n.tSync('api.details.provider'),
+        i18n.tSync('api.details.url'), i18n.tSync('api.details.model'),
+    ];
+    const labelW = Math.max(...fieldLabels.map(l => getStringWidth(l)));
+    const fieldValues = [
+        draft.name || i18n.tSync('status.not_set'), resolveProviderName(draft.provider),
+        draft.baseUrl, draft.model,
+    ];
+    function fieldLine(label, value) {
+        return '    ' + colors.gray + padStringToWidth(label, labelW) + colors.reset + '  ' + colors.cyan + value + colors.reset + '\n';
+    }
+    const overriddenMark = '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset;
+    const versionInfo = colors.bright + colors.cyan + i18n.tSync('add_api.step_n_of_m', '6', '6') + ' · ' + i18n.tSync('add_api.confirm_config') + colors.reset + '\n'
+        + '\n'
+        + fieldLine(fieldLabels[0], fieldValues[0])
+        + fieldLine(fieldLabels[1], fieldValues[1])
+        + fieldLine(fieldLabels[2], fieldValues[2])
+        + fieldLine(fieldLabels[3], fieldValues[3])
+        + '\n'
+        + '    ' + colors.gray + i18n.tSync('add_api.confirm_page_prompt') + colors.reset + '\n'
+        + '\n'
+        + '    ' + i18n.tSync('page.model_config') + '    ' + colors.cyan + modelOverridden + '/' + PREDEFINED_MODEL_ENV_KEYS.length + colors.reset + ' ' + overriddenMark + '\n'
+        + '    ' + i18n.tSync('page.runtime_config') + '    ' + colors.cyan + runtimeOverridden + '/' + PREDEFINED_RUNTIME_KEYS.length + colors.reset + ' ' + overriddenMark + '\n'
+        + '    ' + i18n.tSync('page.custom_vars') + '    ' + colors.cyan + i18n.tSync('summary.x_items', String(customCount)) + colors.reset;
+
+    menu.setOptions([
+        i18n.tSync('action.finish_create'),
+        i18n.tSync('page.model_config'),
+        i18n.tSync('page.runtime_config'),
+        i18n.tSync('page.custom_vars'),
+        i18n.tSync('action.cancel_config'),
+    ]);
+    const hintFn = (idx) => {
+        if (idx === 0) return i18n.tSync('add_api.finish_hint');
+        if (idx === 1) return i18n.tSync('hints.model.desc');
+        if (idx === 2) return i18n.tSync('hints.runtime.desc');
+        if (idx === 3) return i18n.tSync('hints.custom.desc');
+        return null;
+    };
+    const choice = await menu.navigate(versionInfo, hintFn);
+    if (choice === -1 || choice === 4) return 'cancel';
+    if (choice === 0) return 'finish';
+    if (choice === 1) return 'modify_model';
+    if (choice === 2) return 'modify_runtime';
+    if (choice === 3) return 'modify_custom';
+}
+
+/**
+ * Replay draft edits onto a newly created API.
+ * @returns {{ ok: string[], failed: string[] }}
+ */
+function replayDraftToApi(apiManager, draft, newApi) {
+    const ok = [];
+    const failed = [];
+
+    // Model env vars: only write overridden values
+    for (const k of Object.keys(draft.modelEnvVars || {})) {
+        const v = draft.modelEnvVars[k];
+        const autoV = draft._autoModelEnvVars[k] || '';
+        if (v !== autoV) {
+            try {
+                apiManager.updateModelEnvVar(newApi.id, k, v);
+                ok.push('model/' + k);
+            } catch (e) {
+                failed.push('model/' + k + ': ' + e.message);
+            }
+        }
+    }
+    // Runtime env vars: only write manual values
+    for (const k of Object.keys(draft.runtimeEnvVars || {})) {
+        if ((draft._runtimeEnvSources || {})[k] === 'manual') {
+            try {
+                apiManager.updateRuntimeEnvVar(newApi.id, k, draft.runtimeEnvVars[k]);
+                ok.push('runtime/' + k);
+            } catch (e) {
+                failed.push('runtime/' + k + ': ' + e.message);
+            }
+        }
+    }
+    // Custom env vars
+    for (const [k, v] of Object.entries(draft.customEnvVars || {})) {
+        try {
+            apiManager.setCustomEnvVar(newApi.id, k, v);
+            ok.push('custom/' + k);
+        } catch (e) {
+            failed.push('custom/' + k + ': ' + e.message);
+        }
+    }
+    return { ok, failed };
+}
+
+/**
+ * Add new third-party API — 6-step wizard with state machine.
+ * Step 1: Provider → 2: Base URL → 3: Auth Token → 4: Model → 5: Name → 6: Confirm
  */
 async function addNewThirdPartyApi() {
+    const { getProvider, getSuggestedModels } = require('./lib/presets/providers');
+    let step = 1;
+    let providerId = null, providerMeta = null;
+    let baseUrl = null, authToken = null, model = null, name = '';
+    let draft = null;
+
     try {
-        const apiData = await promptForThirdPartyApi();
+    while (step >= 1 && step <= 6) {
+        switch (step) {
+            case 1: { // Provider
+                const result = await selectProvider({
+                    title: i18n.tSync('add_api.step_n_of_m', '1', '6'),
+                    showNote: true,
+                });
+                if (!result) { step = 0; break; } // Esc = cancel
+                providerId = result.id;
+                providerMeta = getProvider(providerId);
+                baseUrl = null; authToken = null; model = null; name = '';
+                step = 2;
+                break;
+            }
+            case 2: { // Base URL
+                const defaultUrl = providerMeta ? providerMeta.baseUrl || '' : '';
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.field_base_url') + (defaultUrl ? ' [' + defaultUrl + ']' : ''),
+                    { defaultValue: defaultUrl, stepLabel: i18n.tSync('add_api.step_n_of_m', '2', '6') }
+                );
+                if (input === null) { step = 1; break; }
+                baseUrl = input;
+                step = 3;
+                break;
+            }
+            case 3: { // Auth Token
+                const input = await inputStepValue(
+                    i18n.tSync('api.details.token'),
+                    {
+                        stepLabel: i18n.tSync('add_api.step_n_of_m', '3', '6'),
+                        hintLines: ['prompt.exit_to_cancel'],
+                        validate: (v) => {
+                            if (!v || v.trim().length < 10) {
+                                return { valid: false, error: i18n.tSync('errors.api.invalid_token', 'at least 10 characters required') };
+                            }
+                            return { valid: true };
+                        },
+                    }
+                );
+                if (input === null) { step = 2; break; }
+                authToken = input;
+                step = 4;
+                break;
+            }
+            case 4: { // Model
+                const suggested = getSuggestedModels(providerId);
+                const hintLines = suggested.length > 0
+                    ? ['', colors.gray + '  ' + i18n.tSync('add_api.recommended_models') + ': ' + suggested.join(', ') + colors.reset, '']
+                    : ['', ''];
+                const fullPrompt = i18n.tSync('api.details.model');
+                const lines = [''];
+                lines.push(colors.bright + i18n.tSync('add_api.step_n_of_m', '4', '6') + colors.reset);
+                lines.push(colors.cyan + fullPrompt + colors.reset);
+                lines.push(...hintLines);
+                lines.push(colors.gray + i18n.tSync('prompt.exit_to_cancel') + colors.reset);
+                lines.push(colors.gray + i18n.tSync('prompt.empty_to_restore') + colors.reset);
+                lines.push('');
+                screen.render(lines);
+                const input = await simpleInput(colors.green + '> ' + colors.reset);
+                if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
+                    throw new Error(await i18n.t('errors.general.cancelled_by_user'));
+                }
+                if (input.toLowerCase() === 'back') { step = 3; break; }
+                if (input === '' && suggested.length > 0) {
+                    model = suggested[0];
+                } else {
+                    model = input;
+                }
 
-        // Check if this is the first API
-        const isFirstApi = apiManager.getApis().length === 0;
-        const hasExportPassword = apiManager.hasExportPassword();
-
-        const newApi = apiManager.addApi(
-            apiData.baseUrl,
-            apiData.authToken,
-            apiData.model,
-            apiData.name,
-            apiData.provider
-        );
-
-        showSuccess(await i18n.t('messages.success.api_added'), [
-            `Name: ${newApi.name}`,
-            `${await i18n.t('api.details.provider')}: ${newApi.provider}`,
-            `${await i18n.t('api.details.url')}: ${newApi.baseUrl}`,
-            `${await i18n.t('api.details.model')}: ${newApi.model}`
-        ]);
-
-        if (isFirstApi) {
-            showInfo(await i18n.t('messages.info.first_time_usage'));
-        }
-
-    } catch (error) {
-        // Force cleanup stdin state to prevent navigation issues
-        forceStdinCleanup();
-
-        // Check if user cancelled the operation
-        const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
-        if (error.message === cancelledMessage) {
-            // User cancelled - show neutral message instead of error
-            screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
-        } else {
-            // Actual error occurred
-            showError(await i18n.t('errors.api.failed_add', error.message));
+                // Duplicate check
+                const dup = apiManager.checkDuplicate(baseUrl, authToken, model);
+                if (dup.isDuplicate) {
+                    const action = await showDuplicateBranch(dup.existing);
+                    if (action === 'enter_existing') {
+                        await editApiEnvVarsById(apiManager, { apiId: dup.existing.id });
+                        return; // done
+                    }
+                    step = 2; break; // go back to modify connection info
+                }
+                step = 5;
+                break;
+            }
+            case 5: { // Name
+                const fullName = resolveProviderName(providerId);
+                const providerShortName = fullName.split(' (')[0].split(' -')[0];
+                // Count APIs sharing the same short-name prefix (handles moonshot / kimi_for_coding)
+                const sameNameCount = apiManager.config.apis.filter(a => {
+                    const aFull = resolveProviderName(a.provider);
+                    return aFull.split(' (')[0].split(' -')[0] === providerShortName;
+                }).length;
+                const autoName = providerShortName + ' #' + (sameNameCount + 1);
+                const input = await inputStepValue(
+                    i18n.tSync('api.edit.field_name'),
+                    { defaultValue: autoName, stepLabel: i18n.tSync('add_api.step_n_of_m', '5', '6') }
+                );
+                if (input === null) { step = 4; break; }
+                name = input;
+                // Build/rebuild draft preserving manual edits if returning from step 6
+                draft = rebuildDraftPreservingOverrides(draft, providerId, baseUrl, authToken, model, name);
+                step = 6;
+                break;
+            }
+            case 6: { // Config confirmation
+                const action = await showConfigConfirmation(draft);
+                if (action === 'finish') {
+                    try {
+                        const newApi = apiManager.addApi(baseUrl, authToken, model, name, providerId);
+                        const replayResult = replayDraftToApi(apiManager, draft, newApi);
+                        if (replayResult.failed.length > 0) {
+                            screen.write(colors.yellow + i18n.tSync('add_api.partial_failure') + colors.reset + '\n');
+                            await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+                            await editApiEnvVarsById(apiManager, { apiId: newApi.id });
+                        } else {
+                            const isFirstApi = apiManager.getApis().length === 1;
+                            showSuccess(await i18n.t('messages.success.api_added'), [
+                                `Name: ${newApi.name}`,
+                                `${await i18n.t('api.details.provider')}: ${resolveProviderName(newApi.provider)}`,
+                                `${await i18n.t('api.details.url')}: ${newApi.baseUrl}`,
+                                `${await i18n.t('api.details.model')}: ${newApi.model}`
+                            ]);
+                            if (isFirstApi) {
+                                showInfo(await i18n.t('messages.info.first_time_usage'));
+                            }
+                        }
+                    } catch (error) {
+                        forceStdinCleanup();
+                        if (error.code === 'DUPLICATE_API') {
+                            const existing = apiManager.config.apis.find(a => a.id === error.existingApiId);
+                            if (existing) {
+                                screen.write(colors.yellow + i18n.tSync('add_api.duplicate_race_lost') + colors.reset + '\n');
+                                const action = await showDuplicateBranch(existing);
+                                if (action === 'enter_existing') {
+                                    await editApiEnvVarsById(apiManager, { apiId: existing.id });
+                                }
+                                return;
+                            }
+                        }
+                        const cancelledMessage = await i18n.t('errors.general.cancelled_by_user');
+                        if (error.message === cancelledMessage) {
+                            screen.write(colors.yellow + await i18n.t('messages.info.operation_cancelled') + colors.reset + '\n');
+                        } else {
+                            showError(await i18n.t('errors.api.failed_add', error.message));
+                        }
+                    }
+                    return; // Exit loop on all paths
+                } else if (action === 'cancel') {
+                    return; // back to main menu
+                } else {
+                    // modify_model, modify_runtime, modify_custom
+                    await editDraftSection(draft, action);
+                    // Loop back to step 6 (confirmation re-renders)
+                }
+                break;
+            }
         }
     }
 
-    await waitForKey(await i18n.t('messages.prompts.press_any_key'));
+    if (step === 0) {
+        screen.write(colors.yellow + i18n.tSync('messages.info.operation_cancelled') + colors.reset + '\n');
+    }
+    } catch (error) {
+        forceStdinCleanup();
+        const cancelledMsg = i18n.tSync('errors.general.cancelled_by_user');
+        if (error.message === cancelledMsg) {
+            screen.write(colors.yellow + i18n.tSync('messages.info.operation_cancelled') + colors.reset + '\n');
+        } else if (error.code === 'DUPLICATE_API') {
+            const existing = apiManager.config.apis.find(a => a.id === error.existingApiId);
+            if (existing) {
+                screen.write(colors.yellow + i18n.tSync('add_api.duplicate_race_lost') + colors.reset + '\n');
+            }
+        } else {
+            screen.write(colors.red + error.message + colors.reset + '\n');
+        }
+    }
 }
 
 /**
@@ -1090,6 +1672,9 @@ async function showConfigManagement(restoreIndex = 0) {
     const launchModeVal = config.apiLaunchMode === 'select'
         ? i18n.tSync('config.values.select_mode')
         : i18n.tSync('config.values.direct_mode');
+    const noFlickerVal = config.noFlicker !== false
+        ? i18n.tSync('config.values.recommended_on')
+        : i18n.tSync('config.values.off');
 
     const menuOptions = [
         padStringToWidth(i18n.tSync('menu.config.language'), labelWidth) + langName,
@@ -1097,6 +1682,7 @@ async function showConfigManagement(restoreIndex = 0) {
         padStringToWidth(i18n.tSync('menu.config.model_upgrade_notification'), labelWidth) + upgradeNotifVal,
         padStringToWidth(i18n.tSync('menu.config.telemetry'), labelWidth) + telemetryVal,
         padStringToWidth(i18n.tSync('menu.config.api_launch_mode'), labelWidth) + launchModeVal,
+        padStringToWidth(i18n.tSync('menu.config.no_flicker'), labelWidth) + noFlickerVal,
         i18n.tSync('menu.config.back')
     ];
 
@@ -1108,6 +1694,7 @@ async function showConfigManagement(restoreIndex = 0) {
             case 2: return i18n.tSync('hints.config.upgrade_notification');
             case 3: return i18n.tSync('hints.config.telemetry');
             case 4: return i18n.tSync('hints.config.launch_mode');
+            case 5: return i18n.tSync('hints.config.no_flicker');
             default: return null;
         }
     };
@@ -1155,7 +1742,13 @@ async function showConfigManagement(restoreIndex = 0) {
             return showConfigManagement(4);
         }
 
-        case 5: // Back
+        case 5: { // noFlicker toggle
+            config.noFlicker = !config.noFlicker;
+            await versionChecker.saveConfig(config);
+            return showConfigManagement(5);
+        }
+
+        case 6: // Back
         case -1:
         default:
             return showMenu();
@@ -1334,7 +1927,10 @@ async function showMenu() {
     const cfgTelemetry = hintConfig.disableTelemetry !== false
         ? i18n.tSync('config.values.off')
         : i18n.tSync('config.values.on');
-    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry);
+    const cfgNoFlicker = hintConfig.noFlicker !== false
+        ? i18n.tSync('config.values.on')
+        : i18n.tSync('config.values.off');
+    const hintConfigSummary = i18n.tSync('hints.config_summary', cfgLangName, cfgLaunchMode, cfgTelemetry, cfgNoFlicker);
 
     // Synchronous hint callback — must not use await
     const hintCallback = (selectedIndex) => {
