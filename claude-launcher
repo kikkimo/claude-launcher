@@ -406,15 +406,27 @@ async function editDraftRuntimeConfig(draft) {
     const menu = new Menu();
     const { PREDEFINED_RUNTIME_KEYS, TYPE_A_FIELDS, TYPE_B_FIELDS } = require('./lib/validators');
     const { RUNTIME_CONFIG_LABELS } = require('./lib/api-manager');
+    const { getProvider } = require('./lib/presets/providers');
     const getLabel = (key) => i18nLabel("runtime", key, RUNTIME_CONFIG_LABELS);
+    const providerConfig = getProvider(draft.provider);
+    const providerDefaults = providerConfig ? providerConfig.envVars || {} : {};
 
     while (true) {
         const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
         const rows = runtimeKeys.map(key => {
             const val = draft.runtimeEnvVars[key] || '';
+            const providerVal = providerDefaults[key];
             let display;
             if (val === '') {
-                display = i18n.tSync('status.auto');
+                if (providerVal !== undefined) {
+                    if (TYPE_A_FIELDS.includes(key) && providerVal === '1') {
+                        display = i18n.tSync('status.enabled');
+                    } else {
+                        display = providerVal;
+                    }
+                } else {
+                    display = i18n.tSync('status.auto');
+                }
             } else if (TYPE_A_FIELDS.includes(key) && val === 'off') {
                 display = i18n.tSync('status.disabled');
             } else if (TYPE_A_FIELDS.includes(key) && val === '1') {
@@ -453,8 +465,11 @@ async function editDraftRuntimeConfig(draft) {
         } else {
             const isEffortLevel = (key === 'CLAUDE_CODE_EFFORT_LEVEL');
             const extraHints = isEffortLevel ? ['hints.runtime.effort_values'] : [];
+            const draftVal = draft.runtimeEnvVars[key] || '';
+            const draftProvVal = providerDefaults[key];
+            const draftDisplayVal = draftVal || draftProvVal || i18n.tSync('status.auto');
             const input = await inputStepValue(
-                i18n.tSync('api.edit.current_value', draft.runtimeEnvVars[key] || i18n.tSync('status.default')),
+                i18n.tSync('api.edit.current_value', draftDisplayVal),
                 { allowEmpty: true, hintLines: ['prompt.exit_to_cancel', ...extraHints] }
             );
             if (input === null) continue; // "back"
