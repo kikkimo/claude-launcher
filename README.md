@@ -28,9 +28,12 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Strong password requirements and validation
 
 ### 🚀 **Third-party API Management**
-- Full support for multiple third-party API providers (Anthropic, DeepSeek, Kimi K2.5, MiniMax M2.7, GLM-5.1/ZhiPu AI, and custom APIs)
-- Interactive API configuration with validation
-- **Edit API**: Modify name, provider, base URL, and model for existing APIs
+- Full support for 9 third-party API providers (Anthropic, DeepSeek, Kimi K2.6, MiniMax M2.7, GLM-5.1/ZhiPu AI, and custom APIs)
+- **6-Step Add API Wizard**: Provider → URL → Token → Model → Name → Config Confirm with pre-create duplicate detection, back navigation between steps, and inline config editing before persist
+- **Env Config Editor**: Edit model config (6 fields: Sonnet/Opus/Haiku/Subagent/Custom), runtime config (6 fields: timeout/attribution/nonessential/effort/experimental/nonstreaming), and custom env vars — with per-field hints, provider default values, and overridden markers
+- **Auto Model Tier Matching**: Same-generation auto-matching for all providers (AnthropicOpus/Sonnet/Haiku, DeepSeek pro/flash, GLM 5.1/turbo, etc.)
+- **Interactive API Editing**: Modify name, provider, base URL, model, and all env configs for existing APIs
+- Dynamic column alignment and comprehensive field hints across all supported languages
 - API usage statistics with success/failure tracking
 - Model upgrade notifications and auto-upgrade support
 - Secure configuration backup and restore
@@ -180,7 +183,7 @@ Claude Launcher uses an advanced configuration system:
 
 Configure any third-party API provider through the interactive interface:
 
-- **Supported Providers**: Anthropic, DeepSeek, Moonshot/Kimi (K2.5), MiniMax (CN/Global, M2.7), GLM/ZhiPu AI (GLM-5.1), and custom Anthropic-compatible APIs
+- **Supported Providers**: Anthropic (Opus 4.7/Sonnet 4.6/Haiku 4.5), DeepSeek (V4-Pro/V4-Flash), Moonshot/Kimi (K2.6), MiniMax CN/Global (M2.7), ZhiPu AI/Z.ai (GLM-5.1/5-Turbo), and custom Anthropic-compatible APIs
 - **Secure Storage**: All API tokens encrypted before storage
 - **Validation**: Real-time validation of URLs, tokens, and models
 - **Usage Tracking**: Monitor API usage statistics with success/failure rates
