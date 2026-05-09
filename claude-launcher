@@ -412,9 +412,16 @@ async function editDraftRuntimeConfig(draft) {
         const runtimeKeys = [...PREDEFINED_RUNTIME_KEYS];
         const rows = runtimeKeys.map(key => {
             const val = draft.runtimeEnvVars[key] || '';
-            const display = (val === '') ? i18n.tSync('status.default')
-                : (TYPE_A_FIELDS.includes(key) && val === 'off') ? i18n.tSync('status.disabled')
-                : val;
+            let display;
+            if (val === '') {
+                display = i18n.tSync('status.auto');
+            } else if (TYPE_A_FIELDS.includes(key) && val === 'off') {
+                display = i18n.tSync('status.disabled');
+            } else if (TYPE_A_FIELDS.includes(key) && val === '1') {
+                display = i18n.tSync('status.enabled');
+            } else {
+                display = val;
+            }
             const isManual = (draft._runtimeEnvSources || {})[key] === 'manual';
             const mark = isManual ? '  ' + colors.cyan + i18n.tSync('status.overridden') + colors.reset : '';
             return { label: '  ' + getLabel(key), display, mark };
