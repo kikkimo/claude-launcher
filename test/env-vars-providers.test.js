@@ -17,10 +17,11 @@ test('anthropic models include claude-sonnet-4-6', () => {
 test('anthropic models include claude-haiku-4-5-20251001', () => {
     assert.ok(getProvider('anthropic').models.includes('claude-haiku-4-5-20251001'));
 });
-test('anthropic retains old models', () => {
+test('anthropic model list trimmed to current generation', () => {
     const m = getProvider('anthropic').models;
-    assert.ok(m.includes('claude-3-5-haiku-20241022'));
-    assert.ok(m.includes('claude-opus-4-6'));
+    assert.strictEqual(m.length, 6);
+    assert.ok(m.includes('claude-sonnet-4-5'));
+    assert.ok(m.includes('claude-opus-4-7'));
 });
 test('anthropic versionAlias haiku → 4-5-20251001', () => {
     assert.strictEqual(getLatestModel('claude-haiku-4-5-20251001', 'anthropic'), null);
