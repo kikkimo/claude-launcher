@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-06-14
+
+### Added
+- **New Flagship Models**: `claude-opus-4-8` (anthropic), `kimi-k2.7-code` (moonshot), `MiniMax-M3` (minimax), `glm-5.2[1m]` (zhipu/zai).
+- **Provider Template Drift Migration**: On first load after a provider template upgrade, saved API configs now auto-refresh tier defaults (`ANTHROPIC_DEFAULT_OPUS_MODEL` etc.) while preserving user manual overrides. Backed by `_normalizeApiFields` drift detection; persistence flows through the existing `_migrateApiEntry` → constructor `saveConfig()` lifecycle.
+
+### Changed
+- **GLM Fixed Tier Template**: zhipu/zai now use a fixed tier template (`Opus = Sonnet = glm-5.2[1m]`, `Haiku = glm-5-turbo`) regardless of selected model, replacing the old `glm-5.1 → glm-5-turbo` fast map. `glm-5.1` retained as an optional model (no upgrade alias).
+- **DeepSeek Haiku Alignment**: Haiku tier standardized to `deepseek-v4-flash` (dropped `[1m]`); legacy `deepseek-v4-flash[1m]` configs auto-upgrade via alias.
+- **Moonshot Single Flagship**: Converged to `kimi-k2.7-code` as the sole model; legacy `kimi-k2.6`/`k2.5`/`k2-thinking`/`k2-thinking-turbo`/preview variants now upgrade aliases. Added `ENABLE_TOOL_SEARCH: 'false'` and `CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144'` (provider-only defaults; override via Custom Vars).
+- **GLM Context Window**: zhipu/zai added `CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000'` to match the 1M context of `glm-5.2[1m]`.
+
+### Removed
+- **Moonshot Main List**: Removed `kimi-k2.5`/`kimi-k2-thinking`/`kimi-k2-thinking-turbo` from the model list (retained as upgrade aliases).
+
 ## [3.1.0] - 2026-05-09
 
 ### Added
