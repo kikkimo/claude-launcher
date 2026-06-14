@@ -39,15 +39,15 @@ test('addApi fills modelEnvVars via deepseek template', () => {
     const mgr = makeMgr([]);
     const api = mgr.addApi('https://api.deepseek.com/anthropic', 'sk-ds-test123456', 'deepseek-v4-pro[1m]', 'DS', 'deepseek');
     assert.ok('modelEnvVars' in api);
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash');
 });
 
 test('addApi fills _autoModelEnvVars snapshot', () => {
     const mgr = makeMgr([]);
-    const api = mgr.addApi('https://api.deepseek.com/anthropic', 'sk-ds-test123456', 'deepseek-v4-flash[1m]', 'DS2', 'deepseek');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash[1m]');
+    const api = mgr.addApi('https://api.deepseek.com/anthropic', 'sk-ds-test123456', 'deepseek-v4-flash', 'DS2', 'deepseek');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash');
 });
 
 test('addApi fills runtimeEnvVars all "" and _runtimeEnvSources all "auto"', () => {
