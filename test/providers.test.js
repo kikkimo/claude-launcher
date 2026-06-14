@@ -161,6 +161,7 @@ test('minimax_global: versionAliases matches minimax_cn', () => {
 
 test('anthropic: models include new and legacy models', () => {
     const p = getProvider('anthropic');
+    assert.ok(p.models.includes('claude-opus-4-8'));
     assert.ok(p.models.includes('claude-opus-4-7'));
     assert.ok(p.models.includes('claude-sonnet-4-6'));
     assert.ok(p.models.includes('claude-haiku-4-5-20251001'));
@@ -168,9 +169,10 @@ test('anthropic: models include new and legacy models', () => {
     assert.ok(p.models.includes('claude-sonnet-4-5'));
 });
 
-test('anthropic: versionAliases map opus series to opus-4-7', () => {
-    assert.strictEqual(getLatestModel('claude-opus-4', 'anthropic'), 'claude-opus-4-7');
-    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-7');
+test('anthropic: versionAliases map opus series to opus-4-8', () => {
+    assert.strictEqual(getLatestModel('claude-opus-4', 'anthropic'), 'claude-opus-4-8');
+    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-8');
+    assert.strictEqual(getLatestModel('claude-opus-4-7', 'anthropic'), 'claude-opus-4-8');
 });
 
 test('deepseek: models include v4-pro and v4-flash', () => {

@@ -19,15 +19,15 @@ test('anthropic models include claude-haiku-4-5-20251001', () => {
 });
 test('anthropic model list trimmed to current generation', () => {
     const m = getProvider('anthropic').models;
-    assert.strictEqual(m.length, 6);
+    assert.strictEqual(m.length, 7);
     assert.ok(m.includes('claude-sonnet-4-5'));
     assert.ok(m.includes('claude-opus-4-7'));
 });
 test('anthropic versionAlias haiku → 4-5-20251001', () => {
     assert.strictEqual(getLatestModel('claude-haiku-4-5-20251001', 'anthropic'), null);
 });
-test('anthropic versionAlias opus-4-6 → opus-4-7', () => {
-    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-7');
+test('anthropic versionAlias opus-4-6 → opus-4-8', () => {
+    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-8');
 });
 test('anthropic versionAlias sonnet-4-5 → sonnet-4-6', () => {
     assert.strictEqual(getLatestModel('claude-sonnet-4-5', 'anthropic'), 'claude-sonnet-4-6');
@@ -106,7 +106,7 @@ test('anthropic template: tier-based assignment (sonnet selected)', () => {
     const v = getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-4-6');
     assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'claude-sonnet-4-6');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-4-6');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-4-7');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-4-8');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku-4-5-20251001');
     assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5-20251001');
     assert.strictEqual(v.smallFastModel, 'claude-haiku-4-5-20251001');
