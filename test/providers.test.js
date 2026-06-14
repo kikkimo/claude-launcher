@@ -80,41 +80,42 @@ test('zai: versionAliases matches zhipu', () => {
 
 // ─── Kimi (moonshot) ───
 
-test('moonshot: models list includes kimi-k2.6', () => {
+test('moonshot: models list is single flagship kimi-k2.7-code', () => {
     const p = getProvider('moonshot');
-    assert.ok(p.models.includes('kimi-k2.6'));
-    assert.ok(p.models.includes('kimi-k2.5'));
-    assert.ok(p.models.includes('kimi-k2-thinking'));
-    assert.ok(p.models.includes('kimi-k2-thinking-turbo'));
-    assert.strictEqual(p.models.length, 4);
+    assert.ok(p.models.includes('kimi-k2.7-code'));
+    assert.strictEqual(p.models.length, 1);
 });
 
-test('moonshot: removed kimi-k2-0711-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2.6 aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: removed kimi-k2-0905-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2.5 aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: removed kimi-k2-turbo-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-thinking aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2-thinking aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-0711-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2.5 aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-0905-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: latest kimi-k2.6 has no alias', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), null);
+test('moonshot: kimi-k2-turbo-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k2.7-code');
+});
+
+test('moonshot: latest kimi-k2.7-code has no alias', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.7-code', 'moonshot'), null);
 });
 
 // ─── MiniMax ───

@@ -61,11 +61,11 @@ test('deepseek envVars includes NONSTREAMING_FALLBACK=1', () => {
 });
 
 // --- Moonshot/Kimi ---
-test('moonshot models include kimi-k2.6', () => {
-    assert.ok(getProvider('moonshot').models.includes('kimi-k2.6'));
+test('moonshot models include kimi-k2.7-code', () => {
+    assert.ok(getProvider('moonshot').models.includes('kimi-k2.7-code'));
 });
-test('moonshot alias k2-thinking → k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.6');
+test('moonshot alias k2-thinking → k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.7-code');
 });
 test('kimi_for_coding unchanged', () => {
     assert.ok(getProvider('kimi_for_coding').models.includes('kimi-for-coding'));
