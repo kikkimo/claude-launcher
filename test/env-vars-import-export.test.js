@@ -88,11 +88,11 @@ test('round-trip: "0" (Type B) preserved', () => {
 });
 
 test('round-trip: _autoModelEnvVars preserved (DeepSeek flash)', () => {
-    const api = fullApi('rt5', 'deepseek', 'deepseek-v4-pro[1m]', 'deepseek-v4-flash[1m]');
+    const api = fullApi('rt5', 'deepseek', 'deepseek-v4-pro[1m]', 'deepseek-v4-flash');
     const imported = roundTrip(api);
-    assert.strictEqual(imported._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(imported._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(imported.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(imported._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(imported._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(imported.smallFastModel, 'deepseek-v4-flash');
 });
 
 // 2. Export format
@@ -129,9 +129,9 @@ test('_normalizeApiFields: missing modelEnvVars filled by template', () => {
     const api = { id: 'n1', name: 'n1', provider: 'deepseek', baseUrl: 'https://t.com',
         authToken: 'sk-test1234567890', model: 'deepseek-v4-pro[1m]', smallFastModel: 'deepseek-v4-pro[1m]' };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.CLAUDE_CODE_SUBAGENT_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.CLAUDE_CODE_SUBAGENT_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
 });
 
 test('_normalizeApiFields: missing runtimeEnvVars filled with ""', () => {
@@ -170,8 +170,8 @@ test('_normalizeApiFields: partial _autoModelEnvVars missing keys filled', () =>
         _autoModelEnvVars: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro[1m]' },
         modelEnvVars: {} };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
     assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-pro[1m]');
 });
 
@@ -210,8 +210,8 @@ test('_migrateApiEntry fills modelEnvVars via template (DeepSeek flash)', () => 
     const api = { id: 'mig1', name: 'mig1', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/anthropic',
         authToken: 'sk-test1234567890', model: 'deepseek-v4-pro[1m]', smallFastModel: 'deepseek-v4-pro[1m]' };
     mgr._migrateApiEntry(api, PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
 });
 
 // 6. smallFastModel sync
@@ -220,7 +220,7 @@ test('_normalizeApiFields: missing smallFastModel synced from template', () => {
     const api = { id: 'n6', name: 'n6', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/anthropic',
         authToken: 'sk-test1234567890', model: 'deepseek-v4-pro[1m]' };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash');
 });
 
 test('_normalizeApiFields: old auto smallFastModel reset', () => {
@@ -228,8 +228,8 @@ test('_normalizeApiFields: old auto smallFastModel reset', () => {
     const api = { id: 'n7', name: 'n7', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/anthropic',
         authToken: 'sk-test1234567890', model: 'deepseek-v4-pro[1m]', smallFastModel: 'deepseek-v4-pro[1m]' };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
 });
 
 test('_normalizeApiFields: partial snapshot with old smallFastModel fixed', () => {
@@ -239,9 +239,9 @@ test('_normalizeApiFields: partial snapshot with old smallFastModel fixed', () =
         _autoModelEnvVars: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro[1m]' },
         modelEnvVars: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro[1m]' } };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(api.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
 });
 
 crypto.decrypt = origDecrypt;

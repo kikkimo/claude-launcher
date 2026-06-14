@@ -127,9 +127,9 @@ taskHeader('Task 3: buildApiDraft + applyDraftEnvChange');
 test('buildApiDraft fills modelEnvVars via DeepSeek template', () => {
     const draft = ApiManager.buildApiDraft('deepseek', 'https://api.deepseek.com/anthropic',
         'sk-test1234567890', 'deepseek-v4-pro[1m]', 'Test');
-    assert.strictEqual(draft.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(draft._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(draft.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(draft.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(draft._autoModelEnvVars.smallFastModel, 'deepseek-v4-flash');
+    assert.strictEqual(draft.smallFastModel, 'deepseek-v4-flash');
 });
 
 test('buildApiDraft sets runtimeEnvVars all ""', () => {
@@ -154,7 +154,7 @@ test('applyDraftEnvChange empty value restores auto for model', () => {
     ApiManager.applyDraftEnvChange(draft, 'model', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'manual-model');
     assert.strictEqual(draft.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'manual-model');
     ApiManager.applyDraftEnvChange(draft, 'model', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', '');
-    assert.strictEqual(draft.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(draft.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
 });
 
 test('applyDraftEnvChange updates runtime field and sets manual source', () => {

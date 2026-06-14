@@ -182,5 +182,82 @@ test('updateApiField allows saving when no duplicate after excluding self', () =
     assert.strictEqual(result.model, 'new-model-name');
 });
 
+// --- template drift migration (_migrateApiEntry / _normalizeApiFields) ---
+
+console.log('\ntemplate drift migration:');
+
+function makeOldGlmFastMapSnapshot() {
+    // 升级前 makeFastMapTemplate({"glm-5.1":"glm-5-turbo"}) 对 glm-5.1 生成的快照
+    return {
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'glm-5.1',
+        ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'glm-5.1',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.1',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.1',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5-turbo',
+        CLAUDE_CODE_SUBAGENT_MODEL: 'glm-5-turbo',
+        smallFastModel: 'glm-5-turbo',
+    };
+}
+
+test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.2[1m], migrated=true', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
+    const mgr = new ApiManager();
+    mgr.saveConfig = () => {};
+    const oldAuto = makeOldGlmFastMapSnapshot();
+    const api = {
+        provider: 'zhipu', model: 'glm-5.1',
+        modelEnvVars: { ...oldAuto },
+        _autoModelEnvVars: { ...oldAuto },
+        smallFastModel: 'glm-5-turbo',
+        runtimeEnvVars: {}, _runtimeEnvSources: {}, customEnvVars: {},
+    };
+    const migrated = mgr._migrateApiEntry(api, PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
+    assert.strictEqual(migrated, true);
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.smallFastModel, 'glm-5-turbo');
+});
+
+test('_migrateApiEntry drifts: preserves user manual HAIKU override', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
+    const mgr = new ApiManager();
+    mgr.saveConfig = () => {};
+    const oldAuto = makeOldGlmFastMapSnapshot();
+    // 用户手动把 HAIKU 设为 glm-5.1（≠ 旧 auto 的 glm-5-turbo）→ 漂移后应保留
+    const overridden = { ...oldAuto, ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.1' };
+    const api = {
+        provider: 'zhipu', model: 'glm-5.1',
+        modelEnvVars: overridden,
+        _autoModelEnvVars: { ...oldAuto },
+        smallFastModel: 'glm-5-turbo',
+        runtimeEnvVars: {}, _runtimeEnvSources: {}, customEnvVars: {},
+    };
+    mgr._migrateApiEntry(api, PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5.1');
+    // 未被覆盖的 OPUS 仍刷新
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+});
+
+test('_normalizeApiFields no drift: tier values unchanged when snapshot matches template', () => {
+    const { getProvider } = require('../lib/presets/providers');
+    const mgr = new ApiManager();
+    mgr.saveConfig = () => {};
+    const currentTemplate = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.2[1m]');
+    const api = {
+        provider: 'zhipu', model: 'glm-5.2[1m]',
+        modelEnvVars: { ...currentTemplate },
+        _autoModelEnvVars: { ...currentTemplate },
+        smallFastModel: currentTemplate.smallFastModel,
+        runtimeEnvVars: {}, _runtimeEnvSources: {}, customEnvVars: {},
+    };
+    mgr._normalizeApiFields(api);
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

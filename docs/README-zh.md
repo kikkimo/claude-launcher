@@ -28,10 +28,10 @@
 - 强密码要求和验证
 
 ### 🚀 **第三方 API 管理**
-- 全面支持 9 个第三方 API 提供商（Anthropic、DeepSeek、Kimi K2.6、MiniMax M2.7、GLM-5.1/智谱AI 和自定义 API）
+- 全面支持 9 个第三方 API 提供商（Anthropic、DeepSeek、Kimi K2.7-Code、MiniMax M3、GLM-5.2/智谱AI 和自定义 API）
 - **6 步新增 API 向导**：提供商 → URL → Token → 模型 → 名称 → 配置确认，支持预创建重复检测、步骤间返回导航、保存前内联编辑配置
 - **环境变量配置编辑**：编辑模型配置（6 项：Sonnet/Opus/Haiku/子代理/自定义）、运行配置（6 项：超时/署名/非必要流量/推理强度/实验性功能/非流式回退）和自定义变量——配有逐字段提示、Provider 推荐默认值和已覆盖标记
-- **模型同代自动匹配**：所有 Provider 智能匹配同代档位（Anthropic Opus/Sonnet/Haiku、DeepSeek pro/flash、GLM 5.1/turbo 等）
+- **模型同代自动匹配**：所有 Provider 智能匹配同代档位（Anthropic Opus/Sonnet/Haiku、DeepSeek pro/flash、GLM 5.2/turbo 固定档位 等）
 - **交互式 API 编辑**：修改已有 API 的名称、供应商、URL、模型及全部环境变量配置
 - 动态列对齐和全面的字段提示，支持全部 11 种语言
 - API 使用统计，支持成功/失败率追踪
@@ -183,7 +183,7 @@ Claude Launcher 使用先进的配置系统：
 
 通过交互界面配置任何第三方 API 提供商：
 
-- **支持的提供商**：Anthropic（Opus 4.7/Sonnet 4.6/Haiku 4.5）、DeepSeek（V4-Pro/V4-Flash）、Moonshot/Kimi（K2.6）、MiniMax 国内版/国际版（M2.7）、智谱AI/Z.ai（GLM-5.1/5-Turbo）和自定义 Anthropic 兼容 API
+- **支持的提供商**：Anthropic（Opus 4.8/Sonnet 4.6/Haiku 4.5）、DeepSeek（V4-Pro/V4-Flash）、Moonshot/Kimi（K2.7-Code）、MiniMax 国内版/国际版（M3）、智谱AI/Z.ai（GLM-5.2/5-Turbo）和自定义 Anthropic 兼容 API
 - **安全存储**：所有 API 令牌在存储前加密
 - **验证**：URL、令牌和模型的实时验证
 - **使用跟踪**：监控 API 使用统计，支持成功/失败率追踪

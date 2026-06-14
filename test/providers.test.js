@@ -31,37 +31,41 @@ function test(name, fn) {
 
 test('zhipu: models list is correct', () => {
     const p = getProvider('zhipu');
-    assert.deepStrictEqual(p.models, ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7']);
+    assert.deepStrictEqual(p.models, ['glm-5.2[1m]', 'glm-5.1', 'glm-5-turbo', 'glm-5']);
 });
 
 test('zhipu: name includes all current model families', () => {
     const p = getProvider('zhipu');
-    assert.ok(p.name.includes('GLM-5.1'));
+    assert.ok(p.name.includes('GLM-5.2'));
     assert.ok(p.name.includes('5-Turbo'));
 });
 
-test('zhipu: removed glm-4.5 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.5 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: removed glm-4.6 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.6 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: glm-4.7 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.7 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: glm-5 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-5', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-5 (tier role) has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5', 'zhipu'), null);
 });
 
-test('zhipu: glm-5-turbo aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-5-turbo', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-5-turbo (haiku tier) has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5-turbo', 'zhipu'), null);
 });
 
-test('zhipu: latest glm-5.1 has no alias', () => {
+test('zhipu: glm-5.1 (optional retained) has no alias', () => {
     assert.strictEqual(getLatestModel('glm-5.1', 'zhipu'), null);
+});
+
+test('zhipu: latest glm-5.2[1m] has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5.2[1m]', 'zhipu'), null);
 });
 
 // ─── GLM (zai) — must mirror zhipu ───
@@ -80,47 +84,49 @@ test('zai: versionAliases matches zhipu', () => {
 
 // ─── Kimi (moonshot) ───
 
-test('moonshot: models list includes kimi-k2.6', () => {
+test('moonshot: models list is single flagship kimi-k2.7-code', () => {
     const p = getProvider('moonshot');
-    assert.ok(p.models.includes('kimi-k2.6'));
-    assert.ok(p.models.includes('kimi-k2.5'));
-    assert.ok(p.models.includes('kimi-k2-thinking'));
-    assert.ok(p.models.includes('kimi-k2-thinking-turbo'));
-    assert.strictEqual(p.models.length, 4);
+    assert.ok(p.models.includes('kimi-k2.7-code'));
+    assert.strictEqual(p.models.length, 1);
 });
 
-test('moonshot: removed kimi-k2-0711-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2.6 aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: removed kimi-k2-0905-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2.5 aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: removed kimi-k2-turbo-preview aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-thinking aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2-thinking aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-0711-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: kimi-k2.5 aliases to kimi-k2.6', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k2.6');
+test('moonshot: kimi-k2-0905-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k2.7-code');
 });
 
-test('moonshot: latest kimi-k2.6 has no alias', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), null);
+test('moonshot: kimi-k2-turbo-preview aliases to kimi-k2.7-code', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k2.7-code');
+});
+
+test('moonshot: latest kimi-k2.7-code has no alias', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.7-code', 'moonshot'), null);
 });
 
 // ─── MiniMax ───
 
-test('minimax_cn: models list includes highspeed variants and M2', () => {
+test('minimax_cn: models list includes M3, highspeed variants and M2', () => {
     const p = getProvider('minimax_cn');
+    assert.ok(p.models.includes('MiniMax-M3'));
     assert.ok(p.models.includes('MiniMax-M2.7'));
     assert.ok(p.models.includes('MiniMax-M2.7-highspeed'));
     assert.ok(p.models.includes('MiniMax-M2.5'));
@@ -128,21 +134,23 @@ test('minimax_cn: models list includes highspeed variants and M2', () => {
     assert.ok(p.models.includes('MiniMax-M2.1'));
     assert.ok(p.models.includes('MiniMax-M2.1-highspeed'));
     assert.ok(p.models.includes('MiniMax-M2'));
-    assert.strictEqual(p.models.length, 7);
+    assert.strictEqual(p.models.length, 8);
 });
 
-test('minimax_cn: MiniMax-M2.1 aliases to MiniMax-M2.7', () => {
-    const result = getLatestModel('MiniMax-M2.1', 'minimax_cn');
-    // M2.1 may alias to M2.7 (latest in series) — just verify it returns a string
-    assert.ok(typeof result === 'string' || result === null);
+test('minimax_cn: MiniMax-M2.1 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.1', 'minimax_cn'), 'MiniMax-M3');
 });
 
-test('minimax_cn: MiniMax-M2.5 aliases to MiniMax-M2.7', () => {
-    assert.strictEqual(getLatestModel('MiniMax-M2.5', 'minimax_cn'), 'MiniMax-M2.7');
+test('minimax_cn: MiniMax-M2.5 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.5', 'minimax_cn'), 'MiniMax-M3');
 });
 
-test('minimax_cn: latest MiniMax-M2.7 has no alias', () => {
-    assert.strictEqual(getLatestModel('MiniMax-M2.7', 'minimax_cn'), null);
+test('minimax_cn: MiniMax-M2.7 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.7', 'minimax_cn'), 'MiniMax-M3');
+});
+
+test('minimax_cn: latest MiniMax-M3 has no alias', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M3', 'minimax_cn'), null);
 });
 
 test('minimax_global: models list matches minimax_cn', () => {
@@ -161,6 +169,7 @@ test('minimax_global: versionAliases matches minimax_cn', () => {
 
 test('anthropic: models include new and legacy models', () => {
     const p = getProvider('anthropic');
+    assert.ok(p.models.includes('claude-opus-4-8'));
     assert.ok(p.models.includes('claude-opus-4-7'));
     assert.ok(p.models.includes('claude-sonnet-4-6'));
     assert.ok(p.models.includes('claude-haiku-4-5-20251001'));
@@ -168,15 +177,16 @@ test('anthropic: models include new and legacy models', () => {
     assert.ok(p.models.includes('claude-sonnet-4-5'));
 });
 
-test('anthropic: versionAliases map opus series to opus-4-7', () => {
-    assert.strictEqual(getLatestModel('claude-opus-4', 'anthropic'), 'claude-opus-4-7');
-    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-7');
+test('anthropic: versionAliases map opus series to opus-4-8', () => {
+    assert.strictEqual(getLatestModel('claude-opus-4', 'anthropic'), 'claude-opus-4-8');
+    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-8');
+    assert.strictEqual(getLatestModel('claude-opus-4-7', 'anthropic'), 'claude-opus-4-8');
 });
 
-test('deepseek: models include v4-pro and v4-flash', () => {
+test('deepseek: models include v4-pro[1m] and v4-flash', () => {
     const p = getProvider('deepseek');
     assert.ok(p.models.includes('deepseek-v4-pro[1m]'));
-    assert.ok(p.models.includes('deepseek-v4-flash[1m]'));
+    assert.ok(p.models.includes('deepseek-v4-flash'));
     assert.ok(p.models.includes('deepseek-chat'));
     assert.ok(p.models.includes('deepseek-reasoner'));
     assert.strictEqual(p.models.length, 4);
