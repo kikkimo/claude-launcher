@@ -6,6 +6,21 @@ function test(name, fn) {
 }
 
 const { getProvider, getLatestModel } = require('../lib/presets/providers');
+const { getProviderEnvVars } = require('../lib/launcher');
+const { encrypt } = require('../lib/crypto');
+
+function makeMoonshotApi(customEnvVars = {}) {
+    return {
+        provider: 'moonshot',
+        baseUrl: 'https://api.moonshot.cn/anthropic',
+        authToken: encrypt('test-token').value,
+        model: 'kimi-k2.7-code',
+        smallFastModel: 'kimi-k2.7-code',
+        modelEnvVars: {},
+        runtimeEnvVars: {},
+        customEnvVars,
+    };
+}
 
 // --- Anthropic ---
 test('anthropic models include new claude-opus-4-7', () => {
@@ -137,6 +152,19 @@ test('glm tier template: zai uses same factory as zhipu', () => {
     const vz = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.1');
     const va = getProvider('zai').modelEnvTemplate.getValues('glm-5.1');
     assert.deepStrictEqual(va, vz);
+});
+
+// --- moonshot provider-default env vars vs Custom Vars override priority ---
+
+test('moonshot getProviderEnvVars: emits provider defaults ENABLE_TOOL_SEARCH / AUTO_COMPACT_WINDOW', () => {
+    const env = getProviderEnvVars(makeMoonshotApi());
+    assert.strictEqual(env.ENABLE_TOOL_SEARCH, 'false');
+    assert.strictEqual(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '262144');
+});
+
+test('moonshot getProviderEnvVars: customEnvVars overrides provider default', () => {
+    const env = getProviderEnvVars(makeMoonshotApi({ ENABLE_TOOL_SEARCH: 'true' }));
+    assert.strictEqual(env.ENABLE_TOOL_SEARCH, 'true');
 });
 
 console.log(`\nTask 2: ${passed} passed, ${failed} failed`);
