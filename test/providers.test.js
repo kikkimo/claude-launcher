@@ -31,37 +31,41 @@ function test(name, fn) {
 
 test('zhipu: models list is correct', () => {
     const p = getProvider('zhipu');
-    assert.deepStrictEqual(p.models, ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7']);
+    assert.deepStrictEqual(p.models, ['glm-5.2[1m]', 'glm-5.1', 'glm-5-turbo', 'glm-5']);
 });
 
 test('zhipu: name includes all current model families', () => {
     const p = getProvider('zhipu');
-    assert.ok(p.name.includes('GLM-5.1'));
+    assert.ok(p.name.includes('GLM-5.2'));
     assert.ok(p.name.includes('5-Turbo'));
 });
 
-test('zhipu: removed glm-4.5 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.5 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: removed glm-4.6 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.6 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: glm-4.7 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-4.7 aliases to glm-5.2[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.2[1m]');
 });
 
-test('zhipu: glm-5 aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-5', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-5 (tier role) has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5', 'zhipu'), null);
 });
 
-test('zhipu: glm-5-turbo aliases to glm-5.1', () => {
-    assert.strictEqual(getLatestModel('glm-5-turbo', 'zhipu'), 'glm-5.1');
+test('zhipu: glm-5-turbo (haiku tier) has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5-turbo', 'zhipu'), null);
 });
 
-test('zhipu: latest glm-5.1 has no alias', () => {
+test('zhipu: glm-5.1 (optional retained) has no alias', () => {
     assert.strictEqual(getLatestModel('glm-5.1', 'zhipu'), null);
+});
+
+test('zhipu: latest glm-5.2[1m] has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5.2[1m]', 'zhipu'), null);
 });
 
 // ─── GLM (zai) — must mirror zhipu ───

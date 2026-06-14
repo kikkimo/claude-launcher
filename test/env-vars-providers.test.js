@@ -116,5 +116,28 @@ test('anthropic template: tier-based assignment (sonnet selected)', () => {
     assert.strictEqual(v.smallFastModel, 'claude-haiku-4-5-20251001');
 });
 
+// --- GLM tier template (fixed tiers regardless of selected model) ---
+test('glm tier template: opus=sonnet=glm-5.2[1m], haiku=glm-5-turbo when flagship selected', () => {
+    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
+    assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'glm-5-turbo');
+    assert.strictEqual(v.smallFastModel, 'glm-5-turbo');
+});
+test('glm tier template: tiers stay fixed when non-flagship model selected', () => {
+    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5');
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
+});
+test('glm tier template: zai uses same factory as zhipu', () => {
+    const vz = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.1');
+    const va = getProvider('zai').modelEnvTemplate.getValues('glm-5.1');
+    assert.deepStrictEqual(va, vz);
+});
+
 console.log(`\nTask 2: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
