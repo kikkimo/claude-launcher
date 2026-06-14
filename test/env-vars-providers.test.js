@@ -78,6 +78,7 @@ test('minimax_cn models include highspeed variants and M2', () => {
     assert.ok(m.includes('MiniMax-M2.5-highspeed'));
     assert.ok(m.includes('MiniMax-M2.1-highspeed'));
     assert.ok(m.includes('MiniMax-M2'));
+    assert.ok(m.includes('MiniMax-M3'));
 });
 test('minimax_cn retains existing models', () => {
     const m = getProvider('minimax_cn').models;

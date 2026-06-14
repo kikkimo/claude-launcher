@@ -119,8 +119,9 @@ test('moonshot: latest kimi-k2.6 has no alias', () => {
 
 // ─── MiniMax ───
 
-test('minimax_cn: models list includes highspeed variants and M2', () => {
+test('minimax_cn: models list includes M3, highspeed variants and M2', () => {
     const p = getProvider('minimax_cn');
+    assert.ok(p.models.includes('MiniMax-M3'));
     assert.ok(p.models.includes('MiniMax-M2.7'));
     assert.ok(p.models.includes('MiniMax-M2.7-highspeed'));
     assert.ok(p.models.includes('MiniMax-M2.5'));
@@ -128,21 +129,23 @@ test('minimax_cn: models list includes highspeed variants and M2', () => {
     assert.ok(p.models.includes('MiniMax-M2.1'));
     assert.ok(p.models.includes('MiniMax-M2.1-highspeed'));
     assert.ok(p.models.includes('MiniMax-M2'));
-    assert.strictEqual(p.models.length, 7);
+    assert.strictEqual(p.models.length, 8);
 });
 
-test('minimax_cn: MiniMax-M2.1 aliases to MiniMax-M2.7', () => {
-    const result = getLatestModel('MiniMax-M2.1', 'minimax_cn');
-    // M2.1 may alias to M2.7 (latest in series) — just verify it returns a string
-    assert.ok(typeof result === 'string' || result === null);
+test('minimax_cn: MiniMax-M2.1 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.1', 'minimax_cn'), 'MiniMax-M3');
 });
 
-test('minimax_cn: MiniMax-M2.5 aliases to MiniMax-M2.7', () => {
-    assert.strictEqual(getLatestModel('MiniMax-M2.5', 'minimax_cn'), 'MiniMax-M2.7');
+test('minimax_cn: MiniMax-M2.5 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.5', 'minimax_cn'), 'MiniMax-M3');
 });
 
-test('minimax_cn: latest MiniMax-M2.7 has no alias', () => {
-    assert.strictEqual(getLatestModel('MiniMax-M2.7', 'minimax_cn'), null);
+test('minimax_cn: MiniMax-M2.7 aliases to MiniMax-M3', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M2.7', 'minimax_cn'), 'MiniMax-M3');
+});
+
+test('minimax_cn: latest MiniMax-M3 has no alias', () => {
+    assert.strictEqual(getLatestModel('MiniMax-M3', 'minimax_cn'), null);
 });
 
 test('minimax_global: models list matches minimax_cn', () => {
