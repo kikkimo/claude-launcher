@@ -175,10 +175,10 @@ test('anthropic: versionAliases map opus series to opus-4-8', () => {
     assert.strictEqual(getLatestModel('claude-opus-4-7', 'anthropic'), 'claude-opus-4-8');
 });
 
-test('deepseek: models include v4-pro and v4-flash', () => {
+test('deepseek: models include v4-pro[1m] and v4-flash', () => {
     const p = getProvider('deepseek');
     assert.ok(p.models.includes('deepseek-v4-pro[1m]'));
-    assert.ok(p.models.includes('deepseek-v4-flash[1m]'));
+    assert.ok(p.models.includes('deepseek-v4-flash'));
     assert.ok(p.models.includes('deepseek-chat'));
     assert.ok(p.models.includes('deepseek-reasoner'));
     assert.strictEqual(p.models.length, 4);

@@ -37,7 +37,7 @@ test('anthropic versionAlias sonnet-4-5 → sonnet-4-6', () => {
 test('deepseek models include v4-pro[1m] and v4-flash[1m]', () => {
     const m = getProvider('deepseek').models;
     assert.ok(m.includes('deepseek-v4-pro[1m]'));
-    assert.ok(m.includes('deepseek-v4-flash[1m]'));
+    assert.ok(m.includes('deepseek-v4-flash'));
 });
 test('deepseek retains deepseek-chat and deepseek-reasoner', () => {
     const m = getProvider('deepseek').models;
@@ -48,7 +48,10 @@ test('deepseek name updated to V4-Pro/V4-Flash', () => {
     assert.ok(getProvider('deepseek').name.includes('V4-Pro'));
 });
 test('deepseek alias chat → v4-flash', () => {
-    assert.strictEqual(getLatestModel('deepseek-chat', 'deepseek'), 'deepseek-v4-flash[1m]');
+    assert.strictEqual(getLatestModel('deepseek-chat', 'deepseek'), 'deepseek-v4-flash');
+});
+test('deepseek alias v4-flash[1m] → v4-flash (legacy compat)', () => {
+    assert.strictEqual(getLatestModel('deepseek-v4-flash[1m]', 'deepseek'), 'deepseek-v4-flash');
 });
 test('deepseek alias reasoner → v4-pro', () => {
     assert.strictEqual(getLatestModel('deepseek-reasoner', 'deepseek'), 'deepseek-v4-pro[1m]');
@@ -92,15 +95,15 @@ test('deepseek modelEnvTemplate.getValues is function', () => {
 });
 test('deepseek template: pro model → flash for haiku/subagent/smallFast', () => {
     const v = getProvider('deepseek').modelEnvTemplate.getValues('deepseek-v4-pro[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(v.smallFastModel, 'deepseek-v4-flash[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(v.smallFastModel, 'deepseek-v4-flash');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-pro[1m]');
 });
 test('deepseek template: flash model → all flash', () => {
-    const v = getProvider('deepseek').modelEnvTemplate.getValues('deepseek-v4-flash[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash[1m]');
+    const v = getProvider('deepseek').modelEnvTemplate.getValues('deepseek-v4-flash');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash');
 });
 test('anthropic template: tier-based assignment (sonnet selected)', () => {
     const v = getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-4-6');
