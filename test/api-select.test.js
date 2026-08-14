@@ -309,7 +309,8 @@ test('navigation.use_arrows_page_esc exists in all 11 locales', () => {
     const fs = require('fs');
     const path = require('path');
     const localeDir = path.join(__dirname, '..', 'lib', 'i18n', 'locales');
-    const files = fs.readdirSync(localeDir).filter(f => f.endsWith('.js'));
+    // ._*.js are macOS AppleDouble resource-fork files, not locales
+    const files = fs.readdirSync(localeDir).filter(f => f.endsWith('.js') && !f.startsWith('._'));
     assert.ok(files.length >= 11, 'Should have at least 11 locale files');
     for (const file of files) {
         const locale = require(path.join(localeDir, file));
