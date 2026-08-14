@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-08-14
+
+### Added
+- **Anthropic 2026 旗舰**: `claude-fable-5`（旗舰）、`claude-opus-5`、`claude-sonnet-5` 加入模型列表；Haiku tier 维持 `claude-haiku-4-5-20251001`。
+- **GLM-5.3**: zhipu/zai 新旗舰 `glm-5.3`（1M 上下文，编程/智能体强化）；tier 模板更新为 Opus=Sonnet=`glm-5.3`、Haiku=`glm-5-turbo`。
+
+### Changed
+- **Kimi K3 迁移**: moonshot 旗舰从 `kimi-k2.7-code` 切换到 `kimi-k3`（2.8T、1M 上下文）。k2 系列已于 2026-05-25 官方停用，全部 k2 型号（含 `kimi-k2.7-code`）配置为升级别名，启动时引导一键迁移。`CLAUDE_CODE_AUTO_COMPACT_WINDOW` 随 K3 的 1M 上下文从 262144 提升到 1000000。
+- **Anthropic 旧模型升级目标**: opus 4.x 系列 → `claude-opus-5`，sonnet 4.x / 3.7 → `claude-sonnet-5`。
+- **GLM 旧旗舰升级别名**: `glm-5.2[1m]` → `glm-5.3`（glm-4.x 别名同步指向 5.3）。
+- DeepSeek（V4-Pro 0813 GA）与 MiniMax（M3）已是最新，本版无变化。
+
 ## [3.2.1] - 2026-08-14
 
 ### Fixed
