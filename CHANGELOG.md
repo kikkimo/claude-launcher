@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-08-14
+
+### Fixed
+- **Config Silently Lost on Startup (issue #11)**: `saveConfig()` wrote with a truncate-in-place `writeFileSync` — an interrupted write (double Ctrl+C, closed terminal, concurrent instances) could leave `~/.claude-launcher-apis.json` truncated, and `loadConfig()` then silently fell back to an empty config which the first-run wizard persisted over the real file, destroying it permanently.
+
+### Changed
+- **Atomic Crash-Safe Persistence**: saves now write to a temp file (fsynced), rotate the current file to `.bak`, `rename()` atomically into place, and verify by decrypting the file back. A failed verification rolls back from `.bak`. A lockfile (stale after 30s) stops concurrent instances from interleaving writes.
+- **Automatic Corruption Recovery**: on decrypt/parse/structure failure the loader promotes the `.bak` from the last successful save over the corrupt file and continues with that data.
+- **No More Silent Fallback**: if no usable config exists, the manager enters a `loadError` state — `isFirstTimeUsage()` stays `false` (the first-run wizard can no longer overwrite the corrupt file), `saveConfig()` refuses to write until `clearLoadError()` is called explicitly, the API management menu is blocked with a visible warning, and the main menu shows the reason. All 11 locales gained `warnings.config_load_error` / `warnings.config_recovered`.
+- **Authenticated Encryption (AES-256-GCM)**: config and auth tokens are now written as `iv:ciphertext:authTag`; any truncation or tampering fails decryption loudly instead of yielding garbage plaintext. Legacy 2-segment AES-256-CBC payloads remain readable and upgrade to GCM on next save.
+- **Test Suite**: locale parity test now ignores macOS AppleDouble `._*.js` files (platform-migration debris that broke the test on non-native volumes).
+
 ## [3.2.0] - 2026-06-14
 
 ### Added

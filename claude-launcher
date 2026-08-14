@@ -1298,6 +1298,18 @@ async function showApiManagementMenu() {
         '',
     ]);
 
+    // While the config file is unreadable every save is refused (issue #11
+    // guard) — block management so edits can never appear to succeed silently.
+    if (apiManager.loadError) {
+        screen.render([
+            '',
+            colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
+            '',
+        ]);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return showMenu();
+    }
+
     // Check if this is first time usage and prompt for password setup
     if (apiManager.isFirstTimeUsage()) {
         const passwordChoice = await handleFirstTimePasswordSetup();
@@ -1839,9 +1851,26 @@ async function showMenu() {
         // Silently ignore model upgrade check errors
     }
 
+    // Config health warning (issue #11): config loss must be visible, never silent
+    let configHealthWarning = null;
+    if (apiManager.loadError) {
+        configHealthWarning = colors.bright + colors.red + '  ⚠️  ' +
+            i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset;
+    } else if (apiManager.recoveredFromBackup) {
+        configHealthWarning = colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset;
+        apiManager.recoveredFromBackup = false; // warn once per run
+    }
+
     // Combine version info and model upgrade info
     let displayInfo = '';
+    if (configHealthWarning) {
+        displayInfo += configHealthWarning;
+    }
     if (versionInfo) {
+        if (displayInfo) {
+            displayInfo += '\n';
+        }
         displayInfo += versionInfo;
     }
     if (modelUpgradeInfo) {
