@@ -75,3 +75,6 @@ Thumbs.db
 *.spec.js
 /.serena
 /.claude
+
+# Superpowers plans/specs working files
+docs/superpowers/
