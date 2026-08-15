@@ -402,6 +402,37 @@ test('all three generations corrupt: loadError, no silent empty overwrite', () =
     assert.strictEqual(mgr2.isFirstTimeUsage(), false);
 });
 
+// --- credential file permissions (Codex review finding) ---
+
+test('saved config and its backups are owner-only (0600)', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('Perms1');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Perms2');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Perms3');
+    mgr.saveConfig();
+
+    for (const f of [configPath(dir), configPath(dir) + '.bak', configPath(dir) + '.bak2']) {
+        const mode = fs.statSync(f).mode & 0o777;
+        assert.strictEqual(mode, 0o600, `${path.basename(f)} must be 0600, got ${mode.toString(8)}`);
+    }
+});
+
+test('a pre-existing 0600 file keeps owner-only permissions after save', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('KeepPerms');
+    mgr.saveConfig();
+    fs.chmodSync(configPath(dir), 0o600);
+
+    mgr.config = sampleConfig('KeepPerms2');
+    assert.strictEqual(mgr.saveConfig(), true);
+    const mode = fs.statSync(configPath(dir)).mode & 0o777;
+    assert.strictEqual(mode, 0o600, `main must stay 0600, got ${mode.toString(8)}`);
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
