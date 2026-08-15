@@ -343,6 +343,65 @@ test('warnings.config_recovered exists in all 11 locales', () => {
     }
 });
 
+// --- two-generation backup rotation (.bak + .bak2) ---
+
+test('third saveConfig keeps two backup generations: .bak2 = gen1, .bak = gen2', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('Gen1');
+    mgr.saveConfig();
+    const gen1 = fs.readFileSync(configPath(dir), 'utf8');
+    mgr.config = sampleConfig('Gen2');
+    mgr.saveConfig();
+    const gen2 = fs.readFileSync(configPath(dir), 'utf8');
+    mgr.config = sampleConfig('Gen3');
+    mgr.saveConfig();
+
+    assert.strictEqual(fs.readFileSync(configPath(dir) + '.bak', 'utf8'), gen2, '.bak holds gen2');
+    assert.strictEqual(fs.readFileSync(configPath(dir) + '.bak2', 'utf8'), gen1, '.bak2 holds gen1');
+    assert.ok(decrypt(gen1).value.includes('Gen1'));
+    assert.ok(decrypt(gen2).value.includes('Gen2'));
+});
+
+test('corrupt main + corrupt .bak: recovers from .bak2', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('OldestGood');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Gen2');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Gen3');
+    mgr.saveConfig();
+
+    // Corrupt the two newest generations
+    fs.writeFileSync(configPath(dir), 'aabbcc:ddeeff0011');
+    fs.writeFileSync(configPath(dir) + '.bak', 'deadbeef:cafebabe');
+
+    const recovered = new ApiManager(configPath(dir));
+    assert.strictEqual(recovered.loadError, null);
+    assert.strictEqual(recovered.recoveredFromBackup, true);
+    assert.strictEqual(recovered.config.apis[0].name, 'OldestGood');
+});
+
+test('all three generations corrupt: loadError, no silent empty overwrite', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('Gen1');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Gen2');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('Gen3');
+    mgr.saveConfig();
+
+    fs.writeFileSync(configPath(dir), 'aabbcc:ddeeff0011');
+    fs.writeFileSync(configPath(dir) + '.bak', 'deadbeef:cafebabe');
+    fs.writeFileSync(configPath(dir) + '.bak2', '001122:334455');
+
+    const mgr2 = new ApiManager(configPath(dir));
+    assert.ok(mgr2.loadError, 'all generations corrupt must surface loadError');
+    assert.strictEqual(mgr2.isFirstTimeUsage(), false);
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
