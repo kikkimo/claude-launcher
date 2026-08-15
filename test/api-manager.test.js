@@ -45,7 +45,7 @@ function createWithApi() {
         exportPassword: null,
         passwordSkipped: false
     };
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     return mgr;
 }
 
@@ -170,7 +170,7 @@ test('updateApiField duplicate check blocks when baseUrl+token+model match exist
         ],
         activeIndex: 0, version: '2.0.0', createdAt: new Date().toISOString(), exportPassword: null, passwordSkipped: false
     };
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     // Changing a2's model to model-1 would duplicate a1
     assert.throws(() => mgr.updateApiField('a2', 'model', 'model-1'), /duplicate/i);
 });
@@ -202,7 +202,7 @@ function makeOldGlmFastMapSnapshot() {
 test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.3[1m], migrated=true', () => {
     const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     const oldAuto = makeOldGlmFastMapSnapshot();
     const api = {
         provider: 'zhipu', model: 'glm-5.1',
@@ -223,7 +223,7 @@ test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.3[1m], migr
 test('_migrateApiEntry drifts: preserves user manual HAIKU override', () => {
     const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     const oldAuto = makeOldGlmFastMapSnapshot();
     // 用户手动把 HAIKU 设为 glm-5.1（≠ 旧 auto 的 glm-5-turbo）→ 漂移后应保留
     const overridden = { ...oldAuto, ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.1' };
@@ -243,7 +243,7 @@ test('_migrateApiEntry drifts: preserves user manual HAIKU override', () => {
 test('_normalizeApiFields no drift: tier values unchanged when snapshot matches template', () => {
     const { getProvider } = require('../lib/presets/providers');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     const currentTemplate = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.3[1m]');
     const api = {
         provider: 'zhipu', model: 'glm-5.3[1m]',

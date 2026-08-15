@@ -47,7 +47,7 @@ const ApiManager = require('../lib/api-manager');
 function createMgr(config) {
     const mgr = new ApiManager();
     mgr.config = config;
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     return mgr;
 }
 

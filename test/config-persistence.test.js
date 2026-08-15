@@ -541,6 +541,46 @@ test('loading a legacy 0644 config with no content migration still tightens to 0
     assert.strictEqual(mode, 0o600, `load alone must tighten permissions, got ${mode.toString(8)}`);
 });
 
+// --- save-failure propagation (Codex round 2) ---
+// A refused/failed save must never leave the caller believing the change
+// landed: mutating APIs roll memory back and throw; statistics paths roll
+// back silently (must not abort a launch in progress).
+
+test('CAS refusal: addApi throws, memory rolls back, disk untouched', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    const a = new ApiManager(cfg);
+    const b = new ApiManager(cfg); // stale: loaded before A ever saved
+    a.config = sampleConfig('Winner');
+    a.saveConfig();
+
+    assert.throws(
+        () => b.addApi('https://api.example.com', 'sk-cas-token-000000000', 'kimi-k3[1m]', 'Loser', 'moonshot'),
+        /another instance/
+    );
+    assert.strictEqual(b.config.apis.length, 0, 'memory must roll back to the loaded state');
+    const dec = decrypt(fs.readFileSync(cfg, 'utf8'));
+    assert.ok(dec.value.includes('Winner') && !dec.value.includes('Loser'), 'disk still holds the winner');
+});
+
+test('CAS refusal: statistics path rolls back silently without throwing', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    // A first config with an active API, loaded by both instances.
+    const setup = new ApiManager(cfg);
+    setup.config = sampleConfig('StatsBase');
+    setup.saveConfig();
+    const a = new ApiManager(cfg);
+    const b = new ApiManager(cfg);
+    // A writes (fresh stats), making B's snapshot stale.
+    a.recordLaunchAttempt();
+    const diskAfterA = fs.readFileSync(cfg, 'utf8');
+
+    assert.doesNotThrow(() => b.recordLaunchAttempt(), 'stats path must not throw mid-launch');
+    assert.strictEqual(b.config.apis[0].usageCount, 0, 'rolled-back memory has no phantom stats');
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), diskAfterA, 'disk untouched by the refused write');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
