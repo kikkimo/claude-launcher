@@ -166,6 +166,37 @@ function assertDefaultShape(config) {
         assert.strictEqual(reread.customField, 'keep-me');
     });
 
+    await asyncTest('saveConfig: corrupt config file → save refused, file bytes untouched', async () => {
+        removeConfig();
+        fs.writeFileSync(testConfigPath, CORRUPT_BYTES, 'utf8');
+        const { saveConfig } = require('../lib/utils/version-checker');
+        const errors = [];
+        const originalError = console.error;
+        console.error = (...args) => { errors.push(args.join(' ')); };
+        try {
+            await saveConfig({ language: 'de', lastVersionCheck: 123, cachedLatestVersion: '9.9.9' });
+        } finally {
+            console.error = originalError;
+        }
+        assert.strictEqual(fs.readFileSync(testConfigPath, 'utf8'), CORRUPT_BYTES,
+            'saveConfig must not overwrite an existing corrupt config file');
+        assert.ok(errors.length > 0,
+            'refusing the save should emit a diagnostic');
+        assertNoTmpDebris();
+    });
+
+    await asyncTest('saveConfig: absent or parseable file → save proceeds', async () => {
+        removeConfig();
+        const { saveConfig } = require('../lib/utils/version-checker');
+        await saveConfig({ language: 'fr' });
+        assert.strictEqual(JSON.parse(fs.readFileSync(testConfigPath, 'utf8')).language, 'fr',
+            'saveConfig should create the file when it is absent');
+        await saveConfig({ language: 'ru' });
+        assert.strictEqual(JSON.parse(fs.readFileSync(testConfigPath, 'utf8')).language, 'ru',
+            'saveConfig should overwrite when the existing file parses');
+        assertNoTmpDebris();
+    });
+
     // ─── language-manager ───
 
     const LanguageManager = require('../lib/i18n/language-manager');
