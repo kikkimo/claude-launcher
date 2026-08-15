@@ -485,6 +485,45 @@ test('injected failure of the promote rename restores main from .bak', () => {
     assert.strictEqual(JSON.parse(dec.value).apis[0].name, 'FaultInject1', 'restored to the previous generation');
 });
 
+// --- concurrent-instance CAS guard (Codex review finding) ---
+// The write lock serializes writes but cannot stop last-writer-wins on a
+// stale in-memory snapshot. saveConfig must compare the disk state it was
+// loaded from against the disk state under the lock and refuse to
+// overwrite when another instance wrote in between.
+
+test('stale in-memory snapshot cannot overwrite another instance write (CAS)', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    const a = new ApiManager(cfg);
+    const b = new ApiManager(cfg); // both loaded when nothing was on disk
+
+    a.config = sampleConfig('InstanceA');
+    assert.strictEqual(a.saveConfig(), true);
+
+    b.config = sampleConfig('InstanceB-stale');
+    assert.strictEqual(b.saveConfig(), false, 'stale writer must be refused');
+    assert.strictEqual(b.saveConflict, true, 'conflict flag must be observable');
+    const dec = decrypt(fs.readFileSync(cfg, 'utf8'));
+    assert.ok(dec.value.includes('InstanceA'), 'disk still holds A');
+    assert.ok(!dec.value.includes('InstanceB-stale'), 'stale write must not land');
+
+    // A fresh instance that reloads the disk state saves normally.
+    const c = new ApiManager(cfg);
+    c.config = sampleConfig('InstanceC-reloaded');
+    assert.strictEqual(c.saveConfig(), true);
+    assert.ok(decrypt(fs.readFileSync(cfg, 'utf8')).value.includes('InstanceC-reloaded'));
+});
+
+test('same instance saves sequentially without false CAS conflicts', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    for (const name of ['Seq1', 'Seq2', 'Seq3']) {
+        mgr.config = sampleConfig(name);
+        assert.strictEqual(mgr.saveConfig(), true, `sequential save ${name} must succeed`);
+        assert.strictEqual(mgr.saveConflict, false);
+    }
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
