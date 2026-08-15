@@ -433,6 +433,58 @@ test('a pre-existing 0600 file keeps owner-only permissions after save', () => {
     assert.strictEqual(mode, 0o600, `main must stay 0600, got ${mode.toString(8)}`);
 });
 
+// --- crash-window recovery (Codex review finding) ---
+// saveConfig renames main→.bak before promoting .tmp→main. A crash (or a
+// failed second rename) in between leaves main MISSING while .bak still
+// holds the last good state — the loader must recover instead of treating
+// it as first-time usage.
+
+test('main missing with valid .bak (crash between renames) recovers on next load', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('WindowGen1');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('WindowGen2');
+    mgr.saveConfig();
+    // Simulate the crash window: rotation done, promote never happened.
+    fs.unlinkSync(configPath(dir));
+
+    const revived = new ApiManager(configPath(dir));
+    assert.strictEqual(revived.loadError, null, 'crash window must not surface as loadError');
+    assert.strictEqual(revived.recoveredFromBackup, true, '.bak must be promoted on load');
+    assert.strictEqual(revived.config.apis[0].name, 'WindowGen1');
+    assert.ok(decrypt(fs.readFileSync(configPath(dir), 'utf8')).success, 'main rebuilt on disk');
+});
+
+test('injected failure of the promote rename restores main from .bak', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('FaultInject1');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('FaultInject2');
+
+    const realRename = fs.renameSync;
+    let calls = 0;
+    fs.renameSync = function (...args) {
+        calls++;
+        // Second save with no prior .bak: 1 = main→bak, 2 = tmp→main (the promote)
+        if (calls === 2) throw new Error('injected promote failure');
+        return realRename.apply(fs, args);
+    };
+    let ok;
+    try {
+        ok = mgr.saveConfig();
+    } finally {
+        fs.renameSync = realRename;
+    }
+
+    assert.strictEqual(ok, false, 'save must fail under injected fault');
+    assert.ok(fs.existsSync(configPath(dir)), 'main must be restored from .bak, not left missing');
+    const dec = decrypt(fs.readFileSync(configPath(dir), 'utf8'));
+    assert.ok(dec.success, 'restored main is valid');
+    assert.strictEqual(JSON.parse(dec.value).apis[0].name, 'FaultInject1', 'restored to the previous generation');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
