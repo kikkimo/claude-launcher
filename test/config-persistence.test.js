@@ -698,6 +698,42 @@ test('recordLaunchAttempt returns null when the save is refused (round 5: persis
     assert.strictEqual(stale.config.apis[0].usageCount, 0, 'memory rolled back');
 });
 
-// Results
+test('verify-fail + undo-fail + re-read-fail → INDETERMINATE: honest error, memory kept, further saves blocked', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('IndetBase');
+    mgr.saveConfig();
+    mgr.config = sampleConfig('IndetChange');
+
+    const realRead = fs.readFileSync;
+    const realRename = fs.renameSync;
+    let reads = 0, renames = 0;
+    fs.readFileSync = function (p, ...rest) {
+        if (p === configPath(dir)) {
+            reads++;
+            if (reads >= 2) throw new Error('injected persistent read failure'); // 1st=CAS ok; verify + re-read fail
+        }
+        return realRead.call(fs, p, ...rest);
+    };
+    fs.renameSync = function (p, ...rest) {
+        renames++;
+        // Second save with no prior .bak: 1=main→bak, 2=tmp→main, 3=undo(bak→main)
+        if (renames === 3) throw new Error('injected undo rename failure');
+        return realRename.apply(fs, [p, ...rest]);
+    };
+    let ok;
+    try {
+        ok = mgr.saveConfig();
+    } finally {
+        fs.readFileSync = realRead;
+        fs.renameSync = realRename;
+    }
+
+    assert.strictEqual(ok, false, 'save reports failure');
+    assert.strictEqual(mgr.saveOutcome, 'indeterminate', 'outcome must be indeterminate, not a plain not-saved');
+    assert.strictEqual(mgr.config.apis[0].name, 'IndetChange', 'memory must NOT be rolled back when the disk outcome is unknown');
+    assert.throws(() => mgr._saveOrThrow(), /could not be verified/, 'error must not claim the change was lost');
+    assert.strictEqual(mgr.saveConfig(), false, 'further blind saves must be blocked until reload');
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
