@@ -298,6 +298,44 @@ test('duplicate check: buildApiDraft with same provider/model yields same auto v
 taskFooter('Task 6');
 
 // ============================================================
+// Locale completeness for the model-env UI chain (round 4)
+// ============================================================
+
+const fsMod = require('fs');
+const pathMod = require('path');
+
+test('every PREDEFINED_MODEL_ENV_KEYS key has config_labels + a detail hint in all 11 locales', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('../lib/validators');
+    const { MODEL_CONFIG_LABELS } = require('../lib/api-manager');
+    // keys covered by the editor's shortKeyMap (used to build the hint key)
+    const shortKeys = {
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'fable',
+        CLAUDE_CODE_SUBAGENT_MODEL: 'subagent',
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'custom_option',
+        ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'custom_name',
+    };
+    const localeDir = pathMod.join(__dirname, '..', 'lib', 'i18n', 'locales');
+    const files = fsMod.readdirSync(localeDir).filter(f => f.endsWith('.js') && !f.startsWith('._'));
+    assert.ok(files.length >= 11, 'expected at least 11 locales');
+
+    for (const key of PREDEFINED_MODEL_ENV_KEYS) {
+        assert.ok(MODEL_CONFIG_LABELS[key], `MODEL_CONFIG_LABELS missing ${key}`);
+        assert.ok(shortKeys[key], `editor shortKeyMap missing ${key}`);
+        for (const file of files) {
+            const locale = require(pathMod.join(localeDir, file));
+            const label = locale.config_labels && locale.config_labels.model && locale.config_labels.model[key];
+            assert.ok(label, `${file} config_labels.model missing ${key}`);
+            const hintKey = shortKeys[key] + '_detail';
+            const hint = locale.hints && locale.hints.model && locale.hints.model[hintKey];
+            assert.ok(hint, `${file} hints.model missing ${hintKey}`);
+        }
+    }
+});
+
+// ============================================================
 // Final
 // ============================================================
 

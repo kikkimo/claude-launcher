@@ -1571,6 +1571,7 @@ async function showApiSelectMenu(skipPermissions = false) {
 
     // User selected an API
     const selectedApi = apis[choice];
+    let statsRecorded = true;
     try {
         apiManager.setActiveApi(choice);
         apiManager.recordLaunchAttempt();
@@ -1578,12 +1579,16 @@ async function showApiSelectMenu(skipPermissions = false) {
         // setActiveApi is a mutating API and can refuse (concurrent instance);
         // record* paths roll back silently. Proceeding with the launch is
         // still safe — the handoff only needs the selected API.
+        statsRecorded = false;
         screen.debug('[!] ' + error.message);
     }
     screen.exitForHandoff();
-    launchClaudeWithApi(selectedApi, skipPermissions, {
+    // Only install the rollback when the optimistic attempt was recorded —
+    // otherwise rollbackLaunchAttempt would hit getActiveApi(), which the
+    // refused setActiveApi rolled back to a DIFFERENT (stale) API.
+    launchClaudeWithApi(selectedApi, skipPermissions, statsRecorded ? {
         rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
-    });
+    } : {});
 }
 
 /**
