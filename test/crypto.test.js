@@ -195,6 +195,45 @@ test('key derivation is cached: one pbkdf2 per process', () => {
         `derivation takes ${oneDerivationMs.toFixed(2)}ms — the key is being re-derived per call`);
 });
 
+// --- CBC must dispatch to the legacy key only (Codex review finding) -------
+// CBC has no authentication: with a wrong key, ~1/255 of payloads produce
+// coincidentally-valid padding and decrypt to garbage "successfully". If
+// decrypt() tried the current key first for 2-segment payloads, a legacy
+// config/token would be mis-decrypted and never reach the legacy fallback.
+
+test('CBC payload that pads validly under the CURRENT key still decrypts via the legacy key', () => {
+    // Search for a sample where the current key's CBC decryption passes the
+    // padding check — exactly the sample the old current-key-first code
+    // would accept as garbage plaintext.
+    const currentKey = deriveKey(600000);
+    let collision = null;
+    let plaintext = '';
+    for (let i = 0; i < 20000 && collision === null; i++) {
+        plaintext = 'collision-probe-' + i + '-payload';
+        const payload = legacyCbcEncrypt(plaintext);
+        const parts = payload.split(':');
+        try {
+            const d = nodeCrypto.createDecipheriv('aes-256-cbc', currentKey, Buffer.from(parts[0], 'hex'));
+            d.update(parts[1], 'hex');
+            d.final(); // throws unless padding coincidentally validates
+            collision = payload;
+        } catch (_) { /* keep searching */ }
+    }
+    assert.ok(collision, 'expected to find a wrong-key padding-valid CBC sample within 20000 tries');
+
+    const dec = decrypt(collision);
+    assert.ok(dec.success, `decrypt failed: ${dec.error}`);
+    assert.strictEqual(dec.value, plaintext, 'must return the legacy-key plaintext, never wrong-key garbage');
+});
+
+test('CBC garbage that fails under BOTH keys reports failure (not garbage success)', () => {
+    // Random-but-well-formed CBC payload: legacy key must reject it, and the
+    // result must be failure — deterministic because CBC never sees the
+    // current key.
+    const dec = decrypt('0123456789abcdef0011223344556677:' + 'a'.repeat(96));
+    assert.strictEqual(dec.success, false, 'undecryptable CBC payload must fail cleanly');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
