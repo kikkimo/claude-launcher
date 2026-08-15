@@ -681,6 +681,23 @@ test('FABLE slot backfills into pre-fable configs on load (migration)', () => {
         'FABLE slot must be backfilled into old configs on load');
 });
 
+test('recordLaunchAttempt returns null when the save is refused (round 5: persisted-vs-threw)', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    const setup = new ApiManager(cfg);
+    setup.config = sampleConfig('StatsPersist');
+    setup.saveConfig();
+
+    const stale = new ApiManager(cfg);
+    const other = new ApiManager(cfg);
+    other.config = sampleConfig('OtherWriter');
+    other.saveConfig(); // disk moves under `stale`
+
+    const result = stale.recordLaunchAttempt();
+    assert.strictEqual(result, null, 'refused save must surface as a null return, not a truthy API object');
+    assert.strictEqual(stale.config.apis[0].usageCount, 0, 'memory rolled back');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

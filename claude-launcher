@@ -1568,7 +1568,7 @@ async function showApiSelectMenu(skipPermissions = false) {
     let statsRecorded = true;
     try {
         apiManager.setActiveApi(choice);
-        apiManager.recordLaunchAttempt();
+        statsRecorded = apiManager.recordLaunchAttempt() !== null;
     } catch (error) {
         // setActiveApi is a mutating API and can refuse (concurrent instance);
         // record* paths roll back silently. Proceeding with the launch is
@@ -1616,11 +1616,14 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
         return showMenu();
     }
 
-    apiManager.recordLaunchAttempt();
+    const statsRecorded = apiManager.recordLaunchAttempt() !== null;
     screen.exitForHandoff();
-    launchClaudeWithApi(activeApi, skipPermissions, {
+    // Only install the rollback when the optimistic attempt actually
+    // persisted — otherwise the rollback would debit a record that never
+    // landed, breaking usage = success + fail (round 5).
+    launchClaudeWithApi(activeApi, skipPermissions, statsRecorded ? {
         rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
-    });
+    } : {});
 }
 
 /**
