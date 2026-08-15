@@ -524,6 +524,23 @@ test('same instance saves sequentially without false CAS conflicts', () => {
     }
 });
 
+test('loading a legacy 0644 config with no content migration still tightens to 0600', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('LegacyPerms');
+    mgr.saveConfig();
+    // Load once more so field migrations run and get persisted — the next
+    // load must be migration-free, isolating the permission path.
+    new ApiManager(configPath(dir));
+    // Simulate a file created by the pre-hardening implementation (0644).
+    fs.chmodSync(configPath(dir), 0o644);
+
+    const reloaded = new ApiManager(configPath(dir));
+    assert.strictEqual(reloaded.loadError, null);
+    const mode = fs.statSync(configPath(dir)).mode & 0o777;
+    assert.strictEqual(mode, 0o600, `load alone must tighten permissions, got ${mode.toString(8)}`);
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
