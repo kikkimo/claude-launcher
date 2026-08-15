@@ -153,45 +153,44 @@ function assertDefaultShape(config) {
 
     // ─── saveConfig atomicity ───
 
-    await asyncTest('saveConfig: writes content, leaves no .tmp debris', async () => {
+    await asyncTest('saveConfig: writes content, returns true, leaves no .tmp debris', async () => {
         removeConfig();
         const { loadConfig, saveConfig } = require('../lib/utils/version-checker');
         const config = await loadConfig();
         config.language = 'ja';
         config.customField = 'keep-me';
-        await saveConfig(config);
+        assert.strictEqual(await saveConfig(config), true,
+            'saveConfig must return true on success (ApiManager boolean contract)');
         assertNoTmpDebris();
         const reread = JSON.parse(fs.readFileSync(testConfigPath, 'utf8'));
         assert.strictEqual(reread.language, 'ja');
         assert.strictEqual(reread.customField, 'keep-me');
     });
 
-    await asyncTest('saveConfig: corrupt config file → save refused, file bytes untouched', async () => {
+    await asyncTest('saveConfig: corrupt config file → save refused (returns false), file bytes untouched', async () => {
         removeConfig();
         fs.writeFileSync(testConfigPath, CORRUPT_BYTES, 'utf8');
         const { saveConfig } = require('../lib/utils/version-checker');
-        const errors = [];
-        const originalError = console.error;
-        console.error = (...args) => { errors.push(args.join(' ')); };
-        try {
-            await saveConfig({ language: 'de', lastVersionCheck: 123, cachedLatestVersion: '9.9.9' });
-        } finally {
-            console.error = originalError;
-        }
+        debugMessages = [];
+        const result = await saveConfig({ language: 'de', lastVersionCheck: 123, cachedLatestVersion: '9.9.9' });
+        assert.strictEqual(result, false,
+            'saveConfig must return false when refusing a corrupt file');
         assert.strictEqual(fs.readFileSync(testConfigPath, 'utf8'), CORRUPT_BYTES,
             'saveConfig must not overwrite an existing corrupt config file');
-        assert.ok(errors.length > 0,
-            'refusing the save should emit a diagnostic');
+        assert.ok(debugMessages.some(m => m.includes('refusing to save')),
+            'refusing the save should emit a diagnostic via screen.debug (not console.error)');
         assertNoTmpDebris();
     });
 
-    await asyncTest('saveConfig: absent or parseable file → save proceeds', async () => {
+    await asyncTest('saveConfig: absent or parseable file → save proceeds and returns true', async () => {
         removeConfig();
         const { saveConfig } = require('../lib/utils/version-checker');
-        await saveConfig({ language: 'fr' });
+        assert.strictEqual(await saveConfig({ language: 'fr' }), true,
+            'saveConfig must return true when creating an absent file');
         assert.strictEqual(JSON.parse(fs.readFileSync(testConfigPath, 'utf8')).language, 'fr',
             'saveConfig should create the file when it is absent');
-        await saveConfig({ language: 'ru' });
+        assert.strictEqual(await saveConfig({ language: 'ru' }), true,
+            'saveConfig must return true when the existing file parses');
         assert.strictEqual(JSON.parse(fs.readFileSync(testConfigPath, 'utf8')).language, 'ru',
             'saveConfig should overwrite when the existing file parses');
         assertNoTmpDebris();

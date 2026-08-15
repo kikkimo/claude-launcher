@@ -27,6 +27,8 @@ function test(name, fn) {
     }
 }
 
+const nodeCrypto = require('crypto');
+
 const ApiManager = require('../lib/api-manager');
 const { encrypt, decrypt } = require('../lib/crypto');
 
@@ -153,6 +155,67 @@ test('saveConfig takes over a stale lockfile (older than 30s)', () => {
     assert.strictEqual(ok, true, 'stale lock must be taken over');
     const dec = decrypt(fs.readFileSync(configPath(dir), 'utf8'));
     assert.ok(dec.value.includes('Stale'), 'write must land after taking over stale lock');
+});
+
+// --- legacy 10000-iteration key: whole-file backward compatibility (issue #11) ---
+//
+// test/crypto.test.js proves at the crypto layer that old payloads keep
+// decrypting via the legacy-key fallback. This drives a full
+// 10000-iteration-encrypted *apis file* through ApiManager: it must load
+// via the fallback and upgrade to the current 600000-iteration key on the
+// next save.
+
+function machineId() {
+    return os.hostname() + os.userInfo().username + os.platform();
+}
+
+/** Hand-derive the key exactly as lib/crypto.js does, at a chosen iteration count. */
+function deriveKey(iterations) {
+    return nodeCrypto.pbkdf2Sync(machineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+}
+
+/** GCM-encrypt with an externally derived key, in ApiManager's iv:ct:tag hex format. */
+function gcmEncryptWithKey(plaintext, key) {
+    const iv = nodeCrypto.randomBytes(12);
+    const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+    let ct = cipher.update(plaintext, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    return iv.toString('hex') + ':' + ct + ':' + cipher.getAuthTag().toString('hex');
+}
+
+/** GCM-decrypt an iv:ct:tag payload with an externally derived key; throws on mismatch. */
+function gcmDecryptWithKey(payload, key) {
+    const parts = payload.split(':');
+    const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[0], 'hex'));
+    decipher.setAuthTag(Buffer.from(parts[2], 'hex'));
+    let out = decipher.update(parts[1], 'hex', 'utf8');
+    out += decipher.final('utf8');
+    return out;
+}
+
+test('legacy 10000-iteration-encrypted apis file loads via fallback and upgrades to the current key on next save', () => {
+    const dir = tmpDir();
+
+    // Serialize exactly like ApiManager.saveConfig, then encrypt by hand with
+    // the legacy 10000-iteration key — a whole file from before the PBKDF2 bump.
+    const legacyPayload = gcmEncryptWithKey(JSON.stringify(sampleConfig('Legacy Era'), null, 2), deriveKey(10000));
+    fs.writeFileSync(configPath(dir), legacyPayload);
+
+    const mgr = new ApiManager(configPath(dir));
+    assert.strictEqual(mgr.loadError, null, 'legacy-key file must load via decrypt() fallback');
+    assert.strictEqual(mgr.config.apis.length, 1);
+    assert.strictEqual(mgr.config.apis[0].name, 'Legacy Era');
+
+    // The next save must transparently upgrade the file to the current key.
+    mgr.config = sampleConfig('Upgraded Era');
+    assert.strictEqual(mgr.saveConfig(), true, 'saveConfig over the legacy file should succeed');
+
+    // Hand-decrypt the raw file bytes with ONLY the 600000-iteration key —
+    // GCM throws on key mismatch, so success proves no fallback was involved.
+    const onDisk = fs.readFileSync(configPath(dir), 'utf8');
+    const upgraded = JSON.parse(gcmDecryptWithKey(onDisk, deriveKey(600000)));
+    assert.strictEqual(upgraded.apis[0].name, 'Upgraded Era',
+        'file on disk must hold the modified data under the current key');
 });
 
 // --- loadConfig corruption recovery & guards ---
