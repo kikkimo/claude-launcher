@@ -383,6 +383,29 @@ test('E2E E3: corrupt main + valid .bak → TUI shows the recovered-from-backup 
     assert.strictEqual(JSON.parse(dec.value).apis[0].name, 'E3', 'recovered generation comes from .bak');
 });
 
+test('E2E E4: corrupt main + corrupt .bak + valid .bak2 → TUI recovers from .bak2', () => {
+    const home = tuiHome();
+    const cfg = path.join(home, '.claude-launcher-apis.json');
+    // Three generations through the real manager: main=Gen3, .bak=Gen2, .bak2=Gen1.
+    const mgr = new ApiManager(cfg);
+    mgr.addApi('https://api.example.com', 'sk-e4-token-cccccccccc', 'glm-5.3', 'Gen1', 'zhipu');
+    mgr.config.apis[0].name = 'Gen2';
+    mgr.saveConfig();
+    mgr.config.apis[0].name = 'Gen3';
+    mgr.saveConfig();
+    // Corrupt the two newest generations; only .bak2 (Gen1) survives.
+    fs.writeFileSync(cfg, 'aabbcc:ddeeff0011');
+    fs.writeFileSync(cfg + '.bak', 'deadbeef:cafebabe');
+
+    const r = runTui(home);
+    assert.ok(r.stdout.includes('recovered automatically from backup'),
+        `recovery warning must appear; stdout head: ${r.stdout.slice(0, 300)}`);
+    assert.strictEqual(r.status, 0);
+    const dec = decrypt(fs.readFileSync(cfg, 'utf8'));
+    assert.ok(dec.success, 'main file rebuilt and valid');
+    assert.strictEqual(JSON.parse(dec.value).apis[0].name, 'Gen1', 'recovered from the .bak2 generation');
+});
+
 // helper for Group C children without a pre-seeded config
 function childScript(dir) {
     const cfg = path.join(dir, 'apis.json');
