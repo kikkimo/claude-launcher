@@ -982,8 +982,12 @@ async function clearAllApis() {
     const input = await simpleInput(colors.cyan + '  ' + await i18n.t('messages.prompts.confirm_clear_all_input') + colors.reset);
 
     if (input === 'CLEAR') {
-        const clearedCount = apiManager.clearAllApis();
-        showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
+        try {
+            const clearedCount = apiManager.clearAllApis();
+            showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
+        } catch (error) {
+            showError(error.message);
+        }
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
     } else {
         showInfo(await i18n.t('messages.info.clear_cancelled'));
@@ -1069,8 +1073,12 @@ async function viewStatistics() {
             const { simpleInput } = require('./lib/ui/prompts');
             const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
             if (confirm.toLowerCase() === 'y') {
-                apiManager.resetStatistics();
-                screen.write(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset + '\n');
+                try {
+                    apiManager.resetStatistics();
+                    screen.write(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset + '\n');
+                } catch (error) {
+                    showError(error.message);
+                }
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
             }
             return viewStatistics();
@@ -1563,8 +1571,15 @@ async function showApiSelectMenu(skipPermissions = false) {
 
     // User selected an API
     const selectedApi = apis[choice];
-    apiManager.setActiveApi(choice);
-    apiManager.recordLaunchAttempt();
+    try {
+        apiManager.setActiveApi(choice);
+        apiManager.recordLaunchAttempt();
+    } catch (error) {
+        // setActiveApi is a mutating API and can refuse (concurrent instance);
+        // record* paths roll back silently. Proceeding with the launch is
+        // still safe — the handoff only needs the selected API.
+        screen.debug('[!] ' + error.message);
+    }
     screen.exitForHandoff();
     launchClaudeWithApi(selectedApi, skipPermissions, {
         rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)

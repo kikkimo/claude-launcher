@@ -581,6 +581,24 @@ test('CAS refusal: statistics path rolls back silently without throwing', () => 
     assert.strictEqual(fs.readFileSync(cfg, 'utf8'), diskAfterA, 'disk untouched by the refused write');
 });
 
+// --- round 3 findings ---
+
+test('resetStatistics is an interactive operation: CAS refusal throws and rolls back', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    const setup = new ApiManager(cfg);
+    setup.config = sampleConfig('ResetBase');
+    setup.saveConfig();
+
+    const stale = new ApiManager(cfg);       // snapshot matches disk
+    const other = new ApiManager(cfg);       // stale's twin
+    other.config = sampleConfig('OtherWriter');
+    other.saveConfig();                      // disk moves under `stale`
+
+    assert.throws(() => stale.resetStatistics(), /another instance/);
+    assert.strictEqual(stale.config.apis[0].usageCount, 0, 'memory stays rolled back');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
