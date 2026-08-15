@@ -3,6 +3,10 @@
  * Issue #11: CBC has no integrity check; truncated ciphertext could
  * decrypt to garbage instead of failing loudly. GCM fixes that, while
  * decrypt() stays backward-compatible with legacy CBC payloads.
+ *
+ * Task 4 adds: key derivation cached once per process, PBKDF2 raised to
+ * 600000 iterations, and a decrypt() fallback to the legacy
+ * 10000-iteration key so payloads from the old era still decrypt.
  */
 
 const assert = require('assert');
@@ -26,15 +30,48 @@ function test(name, fn) {
 
 const { encrypt, decrypt } = require('../lib/crypto');
 
+function machineId() {
+    return os.hostname() + os.userInfo().username + os.platform();
+}
+
+/** Hand-derive the key exactly as lib/crypto.js does, at a chosen iteration count. */
+function deriveKey(iterations) {
+    return nodeCrypto.pbkdf2Sync(machineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+}
+
+/** GCM-decrypt an iv:ct:tag payload with an externally derived key; throws on mismatch. */
+function gcmDecryptWithKey(payload, key) {
+    const parts = payload.split(':');
+    const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[0], 'hex'));
+    decipher.setAuthTag(Buffer.from(parts[2], 'hex'));
+    let out = decipher.update(parts[1], 'hex', 'utf8');
+    out += decipher.final('utf8');
+    return out;
+}
+
 /** Reproduce the legacy AES-256-CBC output the old encrypt() produced. */
 function legacyCbcEncrypt(plaintext) {
-    const machineId = os.hostname() + os.userInfo().username + os.platform();
-    const key = nodeCrypto.pbkdf2Sync(machineId, 'claude-launcher-salt', 10000, 32, 'sha256');
+    const key = deriveKey(10000);
     const iv = nodeCrypto.randomBytes(16);
     const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
     let ct = cipher.update(plaintext, 'utf8', 'hex');
     ct += cipher.final('hex');
     return iv.toString('hex') + ':' + ct;
+}
+
+/** Reproduce the GCM output encrypt() produced in the 10000-iteration era. */
+function legacyGcmEncrypt(plaintext) {
+    const key = deriveKey(10000);
+    const iv = nodeCrypto.randomBytes(12);
+    const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+    let ct = cipher.update(plaintext, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    return iv.toString('hex') + ':' + ct + ':' + cipher.getAuthTag().toString('hex');
+}
+
+/** Flip the last hex char of a segment (deterministic tamper). */
+function flipLastHexChar(segment) {
+    return segment.slice(0, -1) + (segment.endsWith('0') ? '1' : '0');
 }
 
 test('encrypt produces authenticated GCM format (iv:ciphertext:tag)', () => {
@@ -85,6 +122,77 @@ test('decrypt stays backward-compatible with legacy 2-segment CBC payloads', () 
 test('invalid format (no colon) fails cleanly', () => {
     const dec = decrypt('nocolonhexdata');
     assert.strictEqual(dec.success, false);
+});
+
+// --- Task 4: raised PBKDF2 iterations + legacy-key fallback -------------------
+
+test('encrypt derives its key at 600000 PBKDF2 iterations', () => {
+    const enc = encrypt('iteration-check');
+    assert.ok(enc.success, 'encrypt should succeed');
+    const plaintext = gcmDecryptWithKey(enc.value, deriveKey(600000));
+    assert.strictEqual(plaintext, 'iteration-check');
+});
+
+test('roundtrip with the new 600000-iteration key returns the original payload', () => {
+    const payload = '{"apis":[{"name":"a","authToken":"sk-long-token-value"}]}';
+    const enc = encrypt(payload);
+    const dec = decrypt(enc.value);
+    assert.ok(dec.success, `decrypt failed: ${dec.error}`);
+    assert.strictEqual(dec.value, payload);
+});
+
+test('legacy 10000-iteration GCM payload (3 segments) decrypts via fallback', () => {
+    const legacy = legacyGcmEncrypt('legacy-gcm-secret');
+    const dec = decrypt(legacy);
+    assert.ok(dec.success, `legacy GCM fallback decrypt failed: ${dec.error}`);
+    assert.strictEqual(dec.value, 'legacy-gcm-secret');
+});
+
+test('legacy 10000-iteration CBC payload (2 segments) decrypts via fallback', () => {
+    const legacy = legacyCbcEncrypt('legacy-cbc-fallback-data');
+    const dec = decrypt(legacy);
+    assert.ok(dec.success, `legacy CBC fallback decrypt failed: ${dec.error}`);
+    assert.strictEqual(dec.value, 'legacy-cbc-fallback-data');
+});
+
+test('tampered legacy GCM auth tag fails under both keys (no false success)', () => {
+    const parts = legacyGcmEncrypt('legacy-gcm-tamper').split(':');
+    const dec = decrypt(parts[0] + ':' + parts[1] + ':' + flipLastHexChar(parts[2]));
+    assert.strictEqual(dec.success, false, 'tampered legacy tag must not decrypt via either key');
+});
+
+test('tampered legacy GCM ciphertext fails under both keys (no false success)', () => {
+    const parts = legacyGcmEncrypt('legacy-gcm-tamper').split(':');
+    const dec = decrypt(parts[0] + ':' + flipLastHexChar(parts[1]) + ':' + parts[2]);
+    assert.strictEqual(dec.success, false, 'tampered legacy ciphertext must not decrypt via either key');
+});
+
+test('truncated legacy CBC ciphertext fails under both keys (no false success)', () => {
+    const parts = legacyCbcEncrypt('legacy-cbc-truncate').split(':');
+    // Odd hex length => byte count is not a block multiple, so decryption
+    // must throw for both keys rather than ever yielding padded garbage.
+    const truncated = parts[0] + ':' + parts[1].slice(0, -1);
+    const dec = decrypt(truncated);
+    assert.strictEqual(dec.success, false, 'truncated legacy CBC ciphertext must not decrypt via either key');
+});
+
+test('key derivation is cached: one pbkdf2 per process', () => {
+    const t0 = process.hrtime.bigint();
+    nodeCrypto.pbkdf2Sync(machineId(), 'claude-launcher-salt', 600000, 32, 'sha256');
+    const oneDerivationMs = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(oneDerivationMs > 0, 'sanity: derivation timing');
+
+    const t1 = process.hrtime.bigint();
+    for (let i = 0; i < 200; i++) {
+        const enc = encrypt('cache-probe-' + i);
+        const dec = decrypt(enc.value);
+        if (!dec.success) throw new Error(`roundtrip failed inside timing loop: ${dec.error}`);
+    }
+    const loopMs = Number(process.hrtime.bigint() - t1) / 1e6;
+
+    assert.ok(loopMs < oneDerivationMs,
+        `200 encrypt+decrypt rounds took ${loopMs.toFixed(2)}ms but a single 600000-iteration ` +
+        `derivation takes ${oneDerivationMs.toFixed(2)}ms — the key is being re-derived per call`);
 });
 
 // Results
