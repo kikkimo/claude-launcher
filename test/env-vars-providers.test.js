@@ -14,8 +14,8 @@ function makeMoonshotApi(customEnvVars = {}) {
         provider: 'moonshot',
         baseUrl: 'https://api.moonshot.cn/anthropic',
         authToken: encrypt('test-token').value,
-        model: 'kimi-k3',
-        smallFastModel: 'kimi-k3',
+        model: 'kimi-k3[1m]',
+        smallFastModel: 'kimi-k3[1m]',
         modelEnvVars: {},
         runtimeEnvVars: {},
         customEnvVars,
@@ -78,11 +78,11 @@ test('deepseek envVars includes NONSTREAMING_FALLBACK=1', () => {
 });
 
 // --- Moonshot/Kimi ---
-test('moonshot models include kimi-k3', () => {
-    assert.ok(getProvider('moonshot').models.includes('kimi-k3'));
+test('moonshot models include kimi-k3[1m]', () => {
+    assert.ok(getProvider('moonshot').models.includes('kimi-k3[1m]'));
 });
 test('moonshot alias k2-thinking → k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k3');
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k3[1m]');
 });
 test('kimi_for_coding unchanged', () => {
     assert.ok(getProvider('kimi_for_coding').models.includes('kimi-for-coding'));
@@ -134,11 +134,11 @@ test('anthropic template: tier-based assignment (sonnet selected)', () => {
 });
 
 // --- GLM tier template (fixed tiers regardless of selected model) ---
-test('glm tier template: opus=sonnet=glm-5.3, haiku=glm-5-turbo when flagship selected', () => {
-    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.3');
-    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5.3');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3');
+test('glm tier template: opus=sonnet=glm-5.3[1m], haiku=glm-5-turbo when flagship selected', () => {
+    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
     assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'glm-5-turbo');
     assert.strictEqual(v.smallFastModel, 'glm-5-turbo');
@@ -146,8 +146,8 @@ test('glm tier template: opus=sonnet=glm-5.3, haiku=glm-5-turbo when flagship se
 test('glm tier template: tiers stay fixed when non-flagship model selected', () => {
     const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5');
     assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
 });
 test('glm tier template: zai uses same factory as zhipu', () => {

@@ -31,7 +31,7 @@ function test(name, fn) {
 
 test('zhipu: models list is correct', () => {
     const p = getProvider('zhipu');
-    assert.deepStrictEqual(p.models, ['glm-5.3', 'glm-5.2[1m]', 'glm-5.1', 'glm-5-turbo', 'glm-5']);
+    assert.deepStrictEqual(p.models, ['glm-5.3[1m]', 'glm-5.2[1m]', 'glm-5.1', 'glm-5-turbo', 'glm-5']);
 });
 
 test('zhipu: name includes all current model families', () => {
@@ -40,20 +40,20 @@ test('zhipu: name includes all current model families', () => {
     assert.ok(p.name.includes('5-Turbo'));
 });
 
-test('zhipu: glm-4.5 aliases to glm-5.3', () => {
-    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.3');
+test('zhipu: glm-4.5 aliases to glm-5.3[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.5', 'zhipu'), 'glm-5.3[1m]');
 });
 
-test('zhipu: glm-4.6 aliases to glm-5.3', () => {
-    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.3');
+test('zhipu: glm-4.6 aliases to glm-5.3[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.6', 'zhipu'), 'glm-5.3[1m]');
 });
 
-test('zhipu: glm-4.7 aliases to glm-5.3', () => {
-    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.3');
+test('zhipu: glm-4.7 aliases to glm-5.3[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-4.7', 'zhipu'), 'glm-5.3[1m]');
 });
 
-test('zhipu: glm-5.2[1m] (previous flagship) aliases to glm-5.3', () => {
-    assert.strictEqual(getLatestModel('glm-5.2[1m]', 'zhipu'), 'glm-5.3');
+test('zhipu: glm-5.2[1m] (previous flagship) aliases to glm-5.3[1m]', () => {
+    assert.strictEqual(getLatestModel('glm-5.2[1m]', 'zhipu'), 'glm-5.3[1m]');
 });
 
 test('zhipu: glm-5 (tier role) has no alias', () => {
@@ -68,8 +68,8 @@ test('zhipu: glm-5.1 (optional retained) has no alias', () => {
     assert.strictEqual(getLatestModel('glm-5.1', 'zhipu'), null);
 });
 
-test('zhipu: latest glm-5.3 has no alias', () => {
-    assert.strictEqual(getLatestModel('glm-5.3', 'zhipu'), null);
+test('zhipu: latest glm-5.3[1m] has no alias', () => {
+    assert.strictEqual(getLatestModel('glm-5.3[1m]', 'zhipu'), null);
 });
 
 // ─── GLM (zai) — must mirror zhipu ───
@@ -88,46 +88,46 @@ test('zai: versionAliases matches zhipu', () => {
 
 // ─── Kimi (moonshot) ───
 
-test('moonshot: models list is single flagship kimi-k3', () => {
+test('moonshot: models list is single flagship kimi-k3[1m]', () => {
     const p = getProvider('moonshot');
-    assert.ok(p.models.includes('kimi-k3'));
+    assert.ok(p.models.includes('kimi-k3[1m]'));
     assert.strictEqual(p.models.length, 1);
 });
 
-test('moonshot: kimi-k2.7-code (discontinued k2 series) aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.7-code', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2.7-code (discontinued k2 series) aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.7-code', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2.6 aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2.6 aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.6', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2.5 aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2.5 aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2.5', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2-thinking aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2-thinking aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2-thinking-turbo aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking-turbo', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2-0711-preview aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2-0711-preview aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0711-preview', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2-0905-preview aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2-0905-preview aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-0905-preview', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: kimi-k2-turbo-preview aliases to kimi-k3', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k3');
+test('moonshot: kimi-k2-turbo-preview aliases to kimi-k3[1m]', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-turbo-preview', 'moonshot'), 'kimi-k3[1m]');
 });
 
-test('moonshot: latest kimi-k3 has no alias', () => {
-    assert.strictEqual(getLatestModel('kimi-k3', 'moonshot'), null);
+test('moonshot: latest kimi-k3[1m] has no alias', () => {
+    assert.strictEqual(getLatestModel('kimi-k3[1m]', 'moonshot'), null);
 });
 
 // ─── MiniMax ───

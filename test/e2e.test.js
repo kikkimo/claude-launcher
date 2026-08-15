@@ -90,7 +90,7 @@ test('E2E A: create → save → rotate .bak → corrupt → auto-recover → ed
     //    contains the API (setExportPassword → addApi → one more save).
     const mgr = new ApiManager(cfg);
     mgr.setExportPassword('e2e-pass-123456');            // gen 1 (apis empty)
-    mgr.addApi('https://api.example.com', 'sk-e2e-token-aaaaaaaaaa', 'kimi-k3', 'E2E API', 'moonshot'); // gen 2
+    mgr.addApi('https://api.example.com', 'sk-e2e-token-aaaaaaaaaa', 'kimi-k3[1m]', 'E2E API', 'moonshot'); // gen 2
     mgr.setActiveApi(0);                                  // gen 3 — .bak now = gen 2 (has the API)
     assert.ok(fs.existsSync(cfg + '.bak'), 'save rotated .bak');
 
@@ -208,7 +208,7 @@ test('E2E C1: fake claude exit 0 → launcher exits 0; auth token handed off via
     // Seed a config, then run a child that launches the fake claude with it
     const cfg = path.join(dir, 'apis.json');
     const seeder = new ApiManager(cfg);
-    seeder.addApi('https://api.example.com', 'sk-c1-secret-token-000', 'kimi-k3', 'C1', 'moonshot');
+    seeder.addApi('https://api.example.com', 'sk-c1-secret-token-000', 'kimi-k3[1m]', 'C1', 'moonshot');
 
     const capture = path.join(dir, 'child-env.txt');
     const script = `
@@ -224,7 +224,7 @@ test('E2E C1: fake claude exit 0 → launcher exits 0; auth token handed off via
     const childEnv = fs.readFileSync(capture, 'utf8');
     assert.ok(childEnv.includes('ANTHROPIC_AUTH_TOKEN=sk-c1-secret-token-000'), 'real token reaches the child process env');
     assert.ok(childEnv.includes('ANTHROPIC_BASE_URL=https://api.example.com'));
-    assert.ok(childEnv.includes('ANTHROPIC_MODEL=kimi-k3'));
+    assert.ok(childEnv.includes('ANTHROPIC_MODEL=kimi-k3[1m]'));
     assert.ok(!r.stdout.includes('sk-c1-secret-token-000'), 'launcher stdout must mask the token');
     assert.ok(r.stdout.includes('***'), 'masked placeholder shown for token env var');
 });
@@ -366,7 +366,7 @@ test('E2E E3: corrupt main + valid .bak → TUI shows the recovered-from-backup 
     const cfg = path.join(home, '.claude-launcher-apis.json');
     // Two saves through the real manager so .bak holds generation 1, then corrupt the main file.
     const mgr = new ApiManager(cfg);
-    mgr.addApi('https://api.example.com', 'sk-e3-token-bbbbbbbbbb', 'glm-5.3', 'E3', 'zhipu');
+    mgr.addApi('https://api.example.com', 'sk-e3-token-bbbbbbbbbb', 'glm-5.3[1m]', 'E3', 'zhipu');
     mgr.config.apis[0].name = 'E3b';
     mgr.saveConfig();
     fs.writeFileSync(cfg, 'aabbcc:ddeeff0011');
@@ -388,7 +388,7 @@ test('E2E E4: corrupt main + corrupt .bak + valid .bak2 → TUI recovers from .b
     const cfg = path.join(home, '.claude-launcher-apis.json');
     // Three generations through the real manager: main=Gen3, .bak=Gen2, .bak2=Gen1.
     const mgr = new ApiManager(cfg);
-    mgr.addApi('https://api.example.com', 'sk-e4-token-cccccccccc', 'glm-5.3', 'Gen1', 'zhipu');
+    mgr.addApi('https://api.example.com', 'sk-e4-token-cccccccccc', 'glm-5.3[1m]', 'Gen1', 'zhipu');
     mgr.config.apis[0].name = 'Gen2';
     mgr.saveConfig();
     mgr.config.apis[0].name = 'Gen3';
@@ -411,7 +411,7 @@ function childScript(dir) {
     const cfg = path.join(dir, 'apis.json');
     if (!fs.existsSync(cfg)) {
         const seeder = new ApiManager(cfg);
-        seeder.addApi('https://api.example.com', 'sk-generic-token-000000', 'kimi-k3', 'Generic', 'moonshot');
+        seeder.addApi('https://api.example.com', 'sk-generic-token-000000', 'kimi-k3[1m]', 'Generic', 'moonshot');
     }
     return `
         const { launchClaudeWithApi } = require(${JSON.stringify(path.join(REPO, 'lib', 'launcher'))});
