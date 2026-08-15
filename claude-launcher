@@ -2031,8 +2031,8 @@ async function exportConfiguration() {
         const filename = generateExportFilename();
         const filePath = path.join(exportDir, filename);
 
-        // Write JSON file
-        fs.writeFileSync(filePath, exportData, 'utf8');
+        // Write JSON file (owner-only: the plaintext export contains live API keys)
+        fs.writeFileSync(filePath, exportData, { encoding: 'utf8', mode: 0o600 });
 
         screen.write(colors.green + '✓ ' + i18n.tSync('import_export.export.success_title') + colors.reset + '\n');
         screen.write('\n');
