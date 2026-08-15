@@ -658,6 +658,29 @@ test('read-back failure on the FIRST save (no .bak) removes the unverified file'
         'first save with failed verification must leave NO unverified main file');
 });
 
+test('FABLE slot backfills into pre-fable configs on load (migration)', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('PreFable');
+    mgr.saveConfig();
+    new ApiManager(configPath(dir)); // one load so all fields normalize + persist
+
+    // Strip the FABLE key from every api, re-encrypt, reload — the loader's
+    // field migration must backfill it from the provider template.
+    const { encrypt: enc } = require('../lib/crypto');
+    const raw = JSON.parse(decrypt(fs.readFileSync(configPath(dir), 'utf8')).value);
+    for (const api of raw.apis) {
+        delete api.modelEnvVars.ANTHROPIC_DEFAULT_FABLE_MODEL;
+        delete api._autoModelEnvVars.ANTHROPIC_DEFAULT_FABLE_MODEL;
+    }
+    fs.writeFileSync(configPath(dir), enc(JSON.stringify(raw, null, 2)).value);
+
+    const reloaded = new ApiManager(configPath(dir));
+    const api = reloaded.getApis()[0];
+    assert.ok(api.modelEnvVars.ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'FABLE slot must be backfilled into old configs on load');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

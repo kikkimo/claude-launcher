@@ -77,6 +77,31 @@ test('deepseek envVars includes NONSTREAMING_FALLBACK=1', () => {
     assert.strictEqual(getProvider('deepseek').envVars.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK, '1');
 });
 
+// --- Fable slot (round 3): ANTHROPIC_DEFAULT_FABLE_MODEL across providers ---
+
+test('fable slot: each provider template maps ANTHROPIC_DEFAULT_FABLE_MODEL', () => {
+    assert.strictEqual(
+        getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-5').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'claude-fable-5');
+    assert.strictEqual(
+        getProvider('moonshot').modelEnvTemplate.getValues('kimi-k3[1m]').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'kimi-k3[1m]');
+    assert.strictEqual(
+        getProvider('zhipu').modelEnvTemplate.getValues('glm-5').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'glm-5.3[1m]');
+    assert.strictEqual(
+        getProvider('minimax_cn').modelEnvTemplate.getValues('MiniMax-M2.7').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'MiniMax-M3');
+    assert.strictEqual(
+        getProvider('deepseek').modelEnvTemplate.getValues('deepseek-v4-flash').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'deepseek-v4-pro[1m]');
+});
+
+test('fable slot: key is in the predefined whitelist and exported to child env', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('../lib/validators');
+    assert.ok(PREDEFINED_MODEL_ENV_KEYS.includes('ANTHROPIC_DEFAULT_FABLE_MODEL'));
+});
+
 // --- Moonshot/Kimi ---
 test('moonshot models include kimi-k3[1m]', () => {
     assert.ok(getProvider('moonshot').models.includes('kimi-k3[1m]'));

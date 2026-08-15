@@ -195,8 +195,8 @@ test('deleteDraftCustomEnvVar removes key', () => {
     assert.strictEqual(draft.customEnvVars.MY_VAR, undefined);
 });
 
-test('MODEL_CONFIG_LABELS has 6 entries', () => {
-    assert.strictEqual(Object.keys(ApiManager.MODEL_CONFIG_LABELS).length, 6);
+test('MODEL_CONFIG_LABELS has 7 entries', () => {
+    assert.strictEqual(Object.keys(ApiManager.MODEL_CONFIG_LABELS).length, 7);
 });
 
 test('RUNTIME_CONFIG_LABELS has 6 entries', () => {
