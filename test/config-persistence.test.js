@@ -735,5 +735,30 @@ test('verify-fail + undo-fail + re-read-fail → INDETERMINATE: honest error, me
     assert.throws(() => mgr._saveOrThrow(), /could not be verified/, 'error must not claim the change was lost');
     assert.strictEqual(mgr.saveConfig(), false, 'further blind saves must be blocked until reload');
 });
+
+test('blocked mutations under indeterminate leave memory at the indeterminate point (round 6)', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('GhostGuard');
+    mgr.saveConfig();
+
+    // Enter the indeterminate state (as the triple-fault path would)
+    mgr.saveOutcome = 'indeterminate';
+    mgr._indeterminateSnapshot = JSON.parse(JSON.stringify(mgr.config));
+
+    // Mutators modify memory BEFORE saving; every blocked call must throw
+    // AND leave memory exactly at the indeterminate snapshot — no ghost state.
+    assert.throws(() => mgr.removeApi(0), /could not be verified/);
+    assert.strictEqual(mgr.config.apis.length, 1, 'blocked removeApi must not delete from memory');
+
+    assert.throws(() => mgr.clearAllApis(), /could not be verified/);
+    assert.strictEqual(mgr.config.apis.length, 1, 'blocked clearAllApis must not empty memory');
+
+    assert.throws(() => mgr.updateApiField(mgr.config.apis[0].id, 'name', 'GhostName'), /could not be verified/);
+    assert.strictEqual(mgr.config.apis[0].name, 'GhostGuard', 'blocked update must not rename in memory');
+
+    assert.strictEqual(mgr.recordLaunchAttempt(), null, 'blocked stats returns null');
+    assert.strictEqual(mgr.config.apis[0].usageCount, 0, 'blocked stats must not increment memory');
+});
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
