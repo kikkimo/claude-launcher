@@ -599,6 +599,65 @@ test('resetStatistics is an interactive operation: CAS refusal throws and rolls 
     assert.strictEqual(stale.config.apis[0].usageCount, 0, 'memory stays rolled back');
 });
 
+// --- post-promote rollback (round 3): a failed/unverified promote must
+// never leave an unverified file on disk while memory says "not saved" ---
+
+test('read-back failure after promote rolls the disk back to .bak', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('PrePromote');
+    mgr.saveConfig(); // gen 1 → .bak exists after next save
+    mgr.config = sampleConfig('DoomedPromote');
+
+    const realRead = fs.readFileSync;
+    let reads = 0;
+    fs.readFileSync = function (p, ...rest) {
+        if (p === configPath(dir)) {
+            reads++;
+            if (reads === 2) throw new Error('injected read-back failure'); // 1st: CAS check, 2nd: verify
+        }
+        return realRead.call(fs, p, ...rest);
+    };
+    let ok;
+    try {
+        ok = mgr.saveConfig();
+    } finally {
+        fs.readFileSync = realRead;
+    }
+
+    assert.strictEqual(ok, false, 'save must fail');
+    const dec = decrypt(fs.readFileSync(configPath(dir), 'utf8'));
+    assert.ok(dec.success && dec.value.includes('PrePromote'),
+        'disk must be rolled back to the previous generation, not left unverified');
+});
+
+test('read-back failure on the FIRST save (no .bak) removes the unverified file', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('FirstSaveDoomed');
+
+    const realRead = fs.readFileSync;
+    let reads = 0;
+    fs.readFileSync = function (p, ...rest) {
+        if (p === configPath(dir)) {
+            reads++;
+            // No prior file → the CAS check never reads; the verify read is #1
+            if (reads === 1) throw new Error('injected read-back failure');
+        }
+        return realRead.call(fs, p, ...rest);
+    };
+    let ok;
+    try {
+        ok = mgr.saveConfig();
+    } finally {
+        fs.readFileSync = realRead;
+    }
+
+    assert.strictEqual(ok, false, 'save must fail');
+    assert.ok(!fs.existsSync(configPath(dir)),
+        'first save with failed verification must leave NO unverified main file');
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
