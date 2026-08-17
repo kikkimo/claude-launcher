@@ -234,6 +234,33 @@ test('CBC garbage that fails under BOTH keys reports failure (not garbage succes
     assert.strictEqual(dec.success, false, 'undecryptable CBC payload must fail cleanly');
 });
 
+// --- non-string inputs must fail cleanly, never throw (round 5) -------
+
+test('decrypt(null) returns failure instead of throwing', () => {
+    const dec = decrypt(null);
+    assert.strictEqual(dec.success, false);
+});
+
+test('decrypt(undefined) returns failure instead of throwing', () => {
+    const dec = decrypt(undefined);
+    assert.strictEqual(dec.success, false);
+});
+
+test('decrypt(object) returns failure instead of throwing', () => {
+    const dec = decrypt({ not: 'a string' });
+    assert.strictEqual(dec.success, false);
+});
+
+test('decrypt(number) returns failure instead of throwing', () => {
+    const dec = decrypt(12345);
+    assert.strictEqual(dec.success, false);
+});
+
+test('decrypt(empty string) returns failure instead of throwing', () => {
+    const dec = decrypt('');
+    assert.strictEqual(dec.success, false);
+});
+
 // Results
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
