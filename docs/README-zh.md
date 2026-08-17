@@ -86,6 +86,69 @@ npm install
 node claude-launcher
 ```
 
+### 升级
+
+```bash
+npm install -g @kikkimo/claude-launcher@latest
+```
+
+> **请使用 `install -g ...@latest`，不要用 `npm update -g`。** `npm update -g` 会重新解析你**整个**全局依赖树（包括 npm 自身），因此 npm 在收尾阶段会尝试重写它自己的内置 `npmrc`。在 macOS 上用 Homebrew 安装的 Node，该文件是只读的；在 Windows 官方安装器下，它位于 `C:\Program Files\` 内。于是即便包已经装好，命令仍会以 `EACCES`/`EPERM` 中止。而 `npm install -g <包名>@latest` 只处理这一个包，不受影响。
+
+## 🩺 故障排查
+
+### 全局安装报 `EACCES` / `EPERM`
+
+**先确认是否真的失败了。** npm 是在**最后**的收尾步骤才抛出这个错误，此时包其实已经解包并链接完成，所以工具通常是可用的：
+
+```bash
+claude-launcher
+```
+
+如果启动器能正常运行，说明该错误无害，可以忽略。
+
+**如果命令确实不存在**，说明你的 npm 全局 prefix 指向了当前用户无权写入的目录。把它迁移到主目录下：
+
+```bash
+# macOS / Linux
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.zshrc   # 或 ~/.bashrc
+exec $SHELL -l
+npm install -g @kikkimo/claude-launcher@latest
+```
+
+Windows 上 npm 默认就把全局包装在用户目录（`%APPDATA%\npm`），一般无需此操作，请参见下面的执行策略说明。
+
+> **不要使用 `sudo npm install -g`。** 它虽然能装上，但会在 npm 缓存和全局目录里留下属主为 root 的文件，导致之后的每次安装都以更难排查的方式失败。使用 Node 版本管理器（`nvm`、`fnm`、`volta`）可以从根本上规避这个问题，因为它们的全局目录就在你的主目录下。
+
+### Windows：提示"禁止运行脚本"
+
+npm 会在命令旁生成一个 PowerShell 包装脚本，而 PowerShell 的默认执行策略会拒绝运行它：
+
+```
+无法加载文件 claude-launcher.ps1，因为在此系统上禁止运行脚本。
+```
+
+为当前用户放开本地脚本的执行权限（无需管理员权限）：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+或者直接调用批处理包装脚本：`claude-launcher.cmd`。
+
+### Windows：字符乱码或边框错位
+
+启动器使用 ANSI 颜色和制表符绘制界面。请使用 **Windows Terminal** 或 **PowerShell 7**，二者均支持这些特性；传统的 `cmd.exe` 控制台窗口会渲染错乱。
+
+### 安装成功后仍提示 `claude-launcher: command not found`
+
+说明 npm 的全局 `bin` 目录不在 `PATH` 中。查出该目录并加入你的 shell 配置文件：
+
+```bash
+npm prefix -g       # macOS/Linux 下 bin 目录为 <prefix>/bin，Windows 下即 <prefix> 本身
+```
+
 ## 🎮 使用方法
 
 ### 可用的选项
