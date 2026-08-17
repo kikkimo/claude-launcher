@@ -195,8 +195,8 @@ test('deleteDraftCustomEnvVar removes key', () => {
     assert.strictEqual(draft.customEnvVars.MY_VAR, undefined);
 });
 
-test('MODEL_CONFIG_LABELS has 6 entries', () => {
-    assert.strictEqual(Object.keys(ApiManager.MODEL_CONFIG_LABELS).length, 6);
+test('MODEL_CONFIG_LABELS has 7 entries', () => {
+    assert.strictEqual(Object.keys(ApiManager.MODEL_CONFIG_LABELS).length, 7);
 });
 
 test('RUNTIME_CONFIG_LABELS has 6 entries', () => {
@@ -296,6 +296,38 @@ test('duplicate check: buildApiDraft with same provider/model yields same auto v
 });
 
 taskFooter('Task 6');
+
+// ============================================================
+// Locale completeness for the model-env UI chain (round 4)
+// ============================================================
+
+const fsMod = require('fs');
+const pathMod = require('path');
+
+test('every PREDEFINED_MODEL_ENV_KEYS key has config_labels + a detail hint in all 11 locales', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('../lib/validators');
+    const { MODEL_CONFIG_LABELS } = require('../lib/api-manager');
+    // Walk the PRODUCTION mappings (shared by the API editor and the add-API
+    // draft editor) — a hardcoded copy here would test the copy, not the code.
+    const { MODEL_ENV_DETAIL_KEYS, MODEL_ENV_SHORT_KEY_MAP } = require('../lib/ui/model-env-keys-ui');
+    const localeDir = pathMod.join(__dirname, '..', 'lib', 'i18n', 'locales');
+    const files = fsMod.readdirSync(localeDir).filter(f => f.endsWith('.js') && !f.startsWith('._'));
+    assert.ok(files.length >= 11, 'expected at least 11 locales');
+
+    for (const key of PREDEFINED_MODEL_ENV_KEYS) {
+        assert.ok(MODEL_CONFIG_LABELS[key], `MODEL_CONFIG_LABELS missing ${key}`);
+        assert.ok(MODEL_ENV_SHORT_KEY_MAP[key], `MODEL_ENV_SHORT_KEY_MAP missing ${key}`);
+        assert.ok(MODEL_ENV_DETAIL_KEYS[key], `MODEL_ENV_DETAIL_KEYS missing ${key}`);
+        for (const file of files) {
+            const locale = require(pathMod.join(localeDir, file));
+            const label = locale.config_labels && locale.config_labels.model && locale.config_labels.model[key];
+            assert.ok(label, `${file} config_labels.model missing ${key}`);
+            const hintKey = MODEL_ENV_SHORT_KEY_MAP[key] + '_detail';
+            const hint = locale.hints && locale.hints.model && locale.hints.model[hintKey];
+            assert.ok(hint, `${file} hints.model missing ${hintKey}`);
+        }
+    }
+});
 
 // ============================================================
 // Final

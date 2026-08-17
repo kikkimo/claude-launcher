@@ -24,10 +24,10 @@ function oldApi(id, provider, model) {
 
 const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
 
-test('migration: old API gets 6 modelEnvVars keys', () => {
+test('migration: old API gets 7 modelEnvVars keys', () => {
     const mgr = makeMgr([oldApi('m1', 'custom', 'm')]);
     mgr._migrateApiEntry(mgr.config.apis[0], PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
-    assert.strictEqual(Object.keys(mgr.config.apis[0].modelEnvVars).length, 6);
+    assert.strictEqual(Object.keys(mgr.config.apis[0].modelEnvVars).length, 7);
 });
 
 test('migration: runtimeEnvVars has 6 keys all ""', () => {
@@ -44,10 +44,10 @@ test('migration: _runtimeEnvSources all "auto"', () => {
     for (const v of Object.values(mgr.config.apis[0]._runtimeEnvSources)) assert.strictEqual(v, 'auto');
 });
 
-test('migration: _autoModelEnvVars has 7 keys (6 + smallFastModel)', () => {
+test('migration: _autoModelEnvVars has 8 keys (7 + smallFastModel)', () => {
     const mgr = makeMgr([oldApi('m4', 'custom', 'm4')]);
     mgr._migrateApiEntry(mgr.config.apis[0], PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
-    assert.strictEqual(Object.keys(mgr.config.apis[0]._autoModelEnvVars).length, 7);
+    assert.strictEqual(Object.keys(mgr.config.apis[0]._autoModelEnvVars).length, 8);
     assert.strictEqual(mgr.config.apis[0]._autoModelEnvVars.smallFastModel, 'm4');
 });
 

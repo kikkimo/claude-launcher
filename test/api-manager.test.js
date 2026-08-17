@@ -45,7 +45,7 @@ function createWithApi() {
         exportPassword: null,
         passwordSkipped: false
     };
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     return mgr;
 }
 
@@ -170,7 +170,7 @@ test('updateApiField duplicate check blocks when baseUrl+token+model match exist
         ],
         activeIndex: 0, version: '2.0.0', createdAt: new Date().toISOString(), exportPassword: null, passwordSkipped: false
     };
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     // Changing a2's model to model-1 would duplicate a1
     assert.throws(() => mgr.updateApiField('a2', 'model', 'model-1'), /duplicate/i);
 });
@@ -199,10 +199,10 @@ function makeOldGlmFastMapSnapshot() {
     };
 }
 
-test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.2[1m], migrated=true', () => {
+test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.3[1m], migrated=true', () => {
     const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     const oldAuto = makeOldGlmFastMapSnapshot();
     const api = {
         provider: 'zhipu', model: 'glm-5.1',
@@ -213,17 +213,17 @@ test('_migrateApiEntry drifts zhipu glm-5.1: tier refreshed to glm-5.2[1m], migr
     };
     const migrated = mgr._migrateApiEntry(api, PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
     assert.strictEqual(migrated, true);
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
-    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(api.smallFastModel, 'glm-5-turbo');
 });
 
 test('_migrateApiEntry drifts: preserves user manual HAIKU override', () => {
     const { PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS } = require('../lib/validators');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
+    mgr.saveConfig = () => true;
     const oldAuto = makeOldGlmFastMapSnapshot();
     // 用户手动把 HAIKU 设为 glm-5.1（≠ 旧 auto 的 glm-5-turbo）→ 漂移后应保留
     const overridden = { ...oldAuto, ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.1' };
@@ -237,26 +237,26 @@ test('_migrateApiEntry drifts: preserves user manual HAIKU override', () => {
     mgr._migrateApiEntry(api, PREDEFINED_MODEL_ENV_KEYS, PREDEFINED_RUNTIME_KEYS);
     assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5.1');
     // 未被覆盖的 OPUS 仍刷新
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
 });
 
 test('_normalizeApiFields no drift: tier values unchanged when snapshot matches template', () => {
     const { getProvider } = require('../lib/presets/providers');
     const mgr = new ApiManager();
-    mgr.saveConfig = () => {};
-    const currentTemplate = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.2[1m]');
+    mgr.saveConfig = () => true;
+    const currentTemplate = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.3[1m]');
     const api = {
-        provider: 'zhipu', model: 'glm-5.2[1m]',
+        provider: 'zhipu', model: 'glm-5.3[1m]',
         modelEnvVars: { ...currentTemplate },
         _autoModelEnvVars: { ...currentTemplate },
         smallFastModel: currentTemplate.smallFastModel,
         runtimeEnvVars: {}, _runtimeEnvSources: {}, customEnvVars: {},
     };
     mgr._normalizeApiFields(api);
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
-    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(api.modelEnvVars.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
-    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(api._autoModelEnvVars.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

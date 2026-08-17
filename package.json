@@ -1,6 +1,6 @@
 {
   "name": "@kikkimo/claude-launcher",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Interactive launcher for Claude Code with beautiful Claude-style interface",
   "main": "claude-launcher",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node claude-launcher",
-    "test": "node test/providers.test.js && node test/menu-hints.test.js && node test/version-checker.test.js && node test/api-manager.test.js && node test/launcher.test.js && node test/config-management.test.js && node test/api-select.test.js && node test/env-vars-validators.test.js && node test/env-vars-providers.test.js && node test/env-vars-config.test.js && node test/env-vars-migration.test.js && node test/env-vars-add-api.test.js && node test/env-vars-write-interfaces.test.js && node test/env-vars-import-export.test.js && node test/env-vars-ui.test.js",
+    "test": "node test/providers.test.js && node test/menu-hints.test.js && node test/version-checker.test.js && node test/crypto.test.js && node test/api-manager.test.js && node test/config-persistence.test.js && node test/launcher.test.js && node test/launcher-chain.test.js && node test/model-validation.test.js && node test/config-management.test.js && node test/config-safety.test.js && node test/api-select.test.js && node test/env-vars-validators.test.js && node test/env-vars-providers.test.js && node test/env-vars-config.test.js && node test/env-vars-migration.test.js && node test/env-vars-add-api.test.js && node test/env-vars-write-interfaces.test.js && node test/env-vars-import-export.test.js && node test/env-vars-ui.test.js && node --no-warnings test/e2e.test.js",
     "prepublishOnly": "echo \"Publishing claude-launcher...\"",
     "postinstall": "echo \"Claude Launcher installed successfully! Run 'claude-launcher' to start.\"",
     "publish:public": "npm publish --access public"

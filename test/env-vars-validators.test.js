@@ -26,8 +26,8 @@ test('PREDEFINED_RUNTIME_KEYS includes DISABLE_NONSTREAMING_FALLBACK', () => {
     assert.ok(v.PREDEFINED_RUNTIME_KEYS.includes('CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK'));
 });
 
-test('PREDEFINED_MODEL_ENV_KEYS has 6 entries', () => {
-    assert.strictEqual(v.PREDEFINED_MODEL_ENV_KEYS.length, 6);
+test('PREDEFINED_MODEL_ENV_KEYS has 7 entries', () => {
+    assert.strictEqual(v.PREDEFINED_MODEL_ENV_KEYS.length, 7);
 });
 
 test('TYPE_A_FIELDS has 3 entries', () => {

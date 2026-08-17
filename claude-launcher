@@ -54,6 +54,7 @@ const {
 const { getPasswordInput } = require('./lib/auth/password-input');
 const { passwordGuard, verifyCurrentPassword, setupNewPassword, changePassword: changePasswordModule } = require('./lib/auth/password-validator');
 const { maskApiToken } = require('./lib/validators');
+const { MODEL_ENV_DETAIL_KEYS } = require('./lib/ui/model-env-keys-ui');
 const { showApiSelectionTable, confirmDeletion } = require('./lib/ui/interactive-table');
 const { editApi, editApiEnvVarsById, resolveProviderName } = require('./lib/ui/api-editor');
 const { i18nLabel } = require('./lib/ui/i18n-labels');
@@ -356,14 +357,7 @@ async function editDraftModelConfig(draft) {
         const modelHintFn = (idx) => {
             if (idx >= PREDEFINED_MODEL_ENV_KEYS.length) return null;
             const k = PREDEFINED_MODEL_ENV_KEYS[idx];
-            const dk = {
-                ANTHROPIC_DEFAULT_SONNET_MODEL: 'hints.model.sonnet_detail',
-                ANTHROPIC_DEFAULT_OPUS_MODEL: 'hints.model.opus_detail',
-                ANTHROPIC_DEFAULT_HAIKU_MODEL: 'hints.model.haiku_detail',
-                CLAUDE_CODE_SUBAGENT_MODEL: 'hints.model.subagent_detail',
-                ANTHROPIC_CUSTOM_MODEL_OPTION: 'hints.model.custom_option_detail',
-                ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'hints.model.custom_name_detail',
-            };
+            const dk = MODEL_ENV_DETAIL_KEYS;
             return dk[k] ? i18n.tSync(dk[k]) : null;
         };
         const choice = await menu.navigate(null, modelHintFn, 'navigation.enter_to_edit');
@@ -982,8 +976,12 @@ async function clearAllApis() {
     const input = await simpleInput(colors.cyan + '  ' + await i18n.t('messages.prompts.confirm_clear_all_input') + colors.reset);
 
     if (input === 'CLEAR') {
-        const clearedCount = apiManager.clearAllApis();
-        showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
+        try {
+            const clearedCount = apiManager.clearAllApis();
+            showSuccess(await i18n.t('messages.info.all_apis_cleared', clearedCount));
+        } catch (error) {
+            showError(error.message);
+        }
         await waitForKey(await i18n.t('messages.prompts.press_any_key'));
     } else {
         showInfo(await i18n.t('messages.info.clear_cancelled'));
@@ -1069,8 +1067,12 @@ async function viewStatistics() {
             const { simpleInput } = require('./lib/ui/prompts');
             const confirm = await simpleInput(colors.yellow + '  ' + await i18n.t('statistics.reset_confirm') + ' ' + colors.reset);
             if (confirm.toLowerCase() === 'y') {
-                apiManager.resetStatistics();
-                screen.write(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset + '\n');
+                try {
+                    apiManager.resetStatistics();
+                    screen.write(colors.green + '  ✓ ' + await i18n.t('statistics.reset_success') + colors.reset + '\n');
+                } catch (error) {
+                    showError(error.message);
+                }
                 await waitForKey(await i18n.t('messages.prompts.press_any_key'));
             }
             return viewStatistics();
@@ -1297,6 +1299,18 @@ async function showApiManagementMenu() {
         colors.bright + colors.orange + '📋 ' + await i18n.t('menu.api_management.title') + colors.reset,
         '',
     ]);
+
+    // While the config file is unreadable every save is refused (issue #11
+    // guard) — block management so edits can never appear to succeed silently.
+    if (apiManager.loadError) {
+        screen.render([
+            '',
+            colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
+            '',
+        ]);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return showMenu();
+    }
 
     // Check if this is first time usage and prompt for password setup
     if (apiManager.isFirstTimeUsage()) {
@@ -1551,12 +1565,24 @@ async function showApiSelectMenu(skipPermissions = false) {
 
     // User selected an API
     const selectedApi = apis[choice];
-    apiManager.setActiveApi(choice);
-    apiManager.recordLaunchAttempt();
+    let statsRecorded = true;
+    try {
+        apiManager.setActiveApi(choice);
+        statsRecorded = apiManager.recordLaunchAttempt() !== null;
+    } catch (error) {
+        // setActiveApi is a mutating API and can refuse (concurrent instance);
+        // record* paths roll back silently. Proceeding with the launch is
+        // still safe — the handoff only needs the selected API.
+        statsRecorded = false;
+        screen.debug('[!] ' + error.message);
+    }
     screen.exitForHandoff();
-    launchClaudeWithApi(selectedApi, skipPermissions, {
+    // Only install the rollback when the optimistic attempt was recorded —
+    // otherwise rollbackLaunchAttempt would hit getActiveApi(), which the
+    // refused setActiveApi rolled back to a DIFFERENT (stale) API.
+    launchClaudeWithApi(selectedApi, skipPermissions, statsRecorded ? {
         rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
-    });
+    } : {});
 }
 
 /**
@@ -1590,11 +1616,14 @@ async function handleThirdPartyApiLaunch(skipPermissions = false) {
         return showMenu();
     }
 
-    apiManager.recordLaunchAttempt();
+    const statsRecorded = apiManager.recordLaunchAttempt() !== null;
     screen.exitForHandoff();
-    launchClaudeWithApi(activeApi, skipPermissions, {
+    // Only install the rollback when the optimistic attempt actually
+    // persisted — otherwise the rollback would debit a record that never
+    // landed, breaking usage = success + fail (round 5).
+    launchClaudeWithApi(activeApi, skipPermissions, statsRecorded ? {
         rollbackFn: (errorMessage) => apiManager.rollbackLaunchAttempt(errorMessage)
-    });
+    } : {});
 }
 
 /**
@@ -1839,9 +1868,26 @@ async function showMenu() {
         // Silently ignore model upgrade check errors
     }
 
+    // Config health warning (issue #11): config loss must be visible, never silent
+    let configHealthWarning = null;
+    if (apiManager.loadError) {
+        configHealthWarning = colors.bright + colors.red + '  ⚠️  ' +
+            i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset;
+    } else if (apiManager.recoveredFromBackup) {
+        configHealthWarning = colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset;
+        apiManager.recoveredFromBackup = false; // warn once per run
+    }
+
     // Combine version info and model upgrade info
     let displayInfo = '';
+    if (configHealthWarning) {
+        displayInfo += configHealthWarning;
+    }
     if (versionInfo) {
+        if (displayInfo) {
+            displayInfo += '\n';
+        }
         displayInfo += versionInfo;
     }
     if (modelUpgradeInfo) {
@@ -2002,8 +2048,8 @@ async function exportConfiguration() {
         const filename = generateExportFilename();
         const filePath = path.join(exportDir, filename);
 
-        // Write JSON file
-        fs.writeFileSync(filePath, exportData, 'utf8');
+        // Write JSON file (owner-only: the plaintext export contains live API keys)
+        fs.writeFileSync(filePath, exportData, { encoding: 'utf8', mode: 0o600 });
 
         screen.write(colors.green + '✓ ' + i18n.tSync('import_export.export.success_title') + colors.reset + '\n');
         screen.write('\n');

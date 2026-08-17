@@ -14,8 +14,8 @@ function makeMoonshotApi(customEnvVars = {}) {
         provider: 'moonshot',
         baseUrl: 'https://api.moonshot.cn/anthropic',
         authToken: encrypt('test-token').value,
-        model: 'kimi-k2.7-code',
-        smallFastModel: 'kimi-k2.7-code',
+        model: 'kimi-k3[1m]',
+        smallFastModel: 'kimi-k3[1m]',
         modelEnvVars: {},
         runtimeEnvVars: {},
         customEnvVars,
@@ -23,8 +23,10 @@ function makeMoonshotApi(customEnvVars = {}) {
 }
 
 // --- Anthropic ---
-test('anthropic models include new claude-opus-4-7', () => {
-    assert.ok(getProvider('anthropic').models.includes('claude-opus-4-7'));
+test('anthropic models include current flagships', () => {
+    assert.ok(getProvider('anthropic').models.includes('claude-fable-5'));
+    assert.ok(getProvider('anthropic').models.includes('claude-opus-5'));
+    assert.ok(getProvider('anthropic').models.includes('claude-sonnet-5'));
 });
 test('anthropic models include claude-sonnet-4-6', () => {
     assert.ok(getProvider('anthropic').models.includes('claude-sonnet-4-6'));
@@ -34,18 +36,18 @@ test('anthropic models include claude-haiku-4-5-20251001', () => {
 });
 test('anthropic model list trimmed to current generation', () => {
     const m = getProvider('anthropic').models;
-    assert.strictEqual(m.length, 7);
+    assert.strictEqual(m.length, 10);
     assert.ok(m.includes('claude-sonnet-4-5'));
     assert.ok(m.includes('claude-opus-4-7'));
 });
 test('anthropic versionAlias haiku → 4-5-20251001', () => {
     assert.strictEqual(getLatestModel('claude-haiku-4-5-20251001', 'anthropic'), null);
 });
-test('anthropic versionAlias opus-4-6 → opus-4-8', () => {
-    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-4-8');
+test('anthropic versionAlias opus-4-6 → opus-5', () => {
+    assert.strictEqual(getLatestModel('claude-opus-4-6', 'anthropic'), 'claude-opus-5');
 });
-test('anthropic versionAlias sonnet-4-5 → sonnet-4-6', () => {
-    assert.strictEqual(getLatestModel('claude-sonnet-4-5', 'anthropic'), 'claude-sonnet-4-6');
+test('anthropic versionAlias sonnet-4-5 → sonnet-5', () => {
+    assert.strictEqual(getLatestModel('claude-sonnet-4-5', 'anthropic'), 'claude-sonnet-5');
 });
 
 // --- DeepSeek ---
@@ -75,12 +77,37 @@ test('deepseek envVars includes NONSTREAMING_FALLBACK=1', () => {
     assert.strictEqual(getProvider('deepseek').envVars.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK, '1');
 });
 
-// --- Moonshot/Kimi ---
-test('moonshot models include kimi-k2.7-code', () => {
-    assert.ok(getProvider('moonshot').models.includes('kimi-k2.7-code'));
+// --- Fable slot (round 3): ANTHROPIC_DEFAULT_FABLE_MODEL across providers ---
+
+test('fable slot: each provider template maps ANTHROPIC_DEFAULT_FABLE_MODEL', () => {
+    assert.strictEqual(
+        getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-5').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'claude-fable-5');
+    assert.strictEqual(
+        getProvider('moonshot').modelEnvTemplate.getValues('kimi-k3[1m]').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'kimi-k3[1m]');
+    assert.strictEqual(
+        getProvider('zhipu').modelEnvTemplate.getValues('glm-5').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'glm-5.3[1m]');
+    assert.strictEqual(
+        getProvider('minimax_cn').modelEnvTemplate.getValues('MiniMax-M2.7').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'MiniMax-M3');
+    assert.strictEqual(
+        getProvider('deepseek').modelEnvTemplate.getValues('deepseek-v4-flash').ANTHROPIC_DEFAULT_FABLE_MODEL,
+        'deepseek-v4-pro[1m]');
 });
-test('moonshot alias k2-thinking → k2.7-code', () => {
-    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k2.7-code');
+
+test('fable slot: key is in the predefined whitelist and exported to child env', () => {
+    const { PREDEFINED_MODEL_ENV_KEYS } = require('../lib/validators');
+    assert.ok(PREDEFINED_MODEL_ENV_KEYS.includes('ANTHROPIC_DEFAULT_FABLE_MODEL'));
+});
+
+// --- Moonshot/Kimi ---
+test('moonshot models include kimi-k3[1m]', () => {
+    assert.ok(getProvider('moonshot').models.includes('kimi-k3[1m]'));
+});
+test('moonshot alias k2-thinking → k3', () => {
+    assert.strictEqual(getLatestModel('kimi-k2-thinking', 'moonshot'), 'kimi-k3[1m]');
 });
 test('kimi_for_coding unchanged', () => {
     assert.ok(getProvider('kimi_for_coding').models.includes('kimi-for-coding'));
@@ -122,21 +149,21 @@ test('deepseek template: flash model → all flash', () => {
     assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'deepseek-v4-flash');
 });
 test('anthropic template: tier-based assignment (sonnet selected)', () => {
-    const v = getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-4-6');
-    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'claude-sonnet-4-6');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-4-6');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-4-8');
+    const v = getProvider('anthropic').modelEnvTemplate.getValues('claude-sonnet-5');
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'claude-sonnet-5');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-5');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku-4-5-20251001');
     assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'claude-haiku-4-5-20251001');
     assert.strictEqual(v.smallFastModel, 'claude-haiku-4-5-20251001');
 });
 
 // --- GLM tier template (fixed tiers regardless of selected model) ---
-test('glm tier template: opus=sonnet=glm-5.2[1m], haiku=glm-5-turbo when flagship selected', () => {
-    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.2[1m]');
-    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5.2[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+test('glm tier template: opus=sonnet=glm-5.3[1m], haiku=glm-5-turbo when flagship selected', () => {
+    const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
     assert.strictEqual(v.CLAUDE_CODE_SUBAGENT_MODEL, 'glm-5-turbo');
     assert.strictEqual(v.smallFastModel, 'glm-5-turbo');
@@ -144,8 +171,8 @@ test('glm tier template: opus=sonnet=glm-5.2[1m], haiku=glm-5-turbo when flagshi
 test('glm tier template: tiers stay fixed when non-flagship model selected', () => {
     const v = getProvider('zhipu').modelEnvTemplate.getValues('glm-5');
     assert.strictEqual(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'glm-5');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
-    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.2[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3[1m]');
+    assert.strictEqual(v.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3[1m]');
     assert.strictEqual(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'glm-5-turbo');
 });
 test('glm tier template: zai uses same factory as zhipu', () => {
@@ -159,7 +186,7 @@ test('glm tier template: zai uses same factory as zhipu', () => {
 test('moonshot getProviderEnvVars: emits provider defaults ENABLE_TOOL_SEARCH / AUTO_COMPACT_WINDOW', () => {
     const env = getProviderEnvVars(makeMoonshotApi());
     assert.strictEqual(env.ENABLE_TOOL_SEARCH, 'false');
-    assert.strictEqual(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '262144');
+    assert.strictEqual(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
 });
 
 test('moonshot getProviderEnvVars: customEnvVars overrides provider default', () => {

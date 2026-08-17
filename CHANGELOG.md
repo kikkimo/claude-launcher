@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-08-15
+
+### Added
+- **Anthropic 2026 Flagships**: `claude-fable-5` (flagship), `claude-opus-5`, and `claude-sonnet-5` join the model list; Haiku tier stays at `claude-haiku-4-5-20251001`.
+- **GLM-5.3**: zhipu/zai new flagship `glm-5.3[1m]` (official Claude Code alias, 1M context, enhanced coding and agentic capabilities); tier template updated to Opus=Sonnet=Fable=`glm-5.3[1m]`, Haiku=`glm-5-turbo`.
+- **Fable Model Slot**: `ANTHROPIC_DEFAULT_FABLE_MODEL` supported end to end — added to the predefined key whitelist (auto-backfilled into old configs on load), mapped per provider (anthropic→`claude-fable-5`, moonshot→selected model, GLM→`glm-5.3[1m]`, MiniMax→`MiniMax-M3`, DeepSeek→`deepseek-v4-pro[1m]`), and surfaced in the UI editor with labels and hints in all 11 locales.
+- **Strict E2E Test Suite**: 12 end-to-end scenarios — real child processes (a fake `claude` binary injected on PATH verifies env handoff, masking, exit codes, and signal handling), a real local self-signed HTTPS server (plaintext/encrypted token paths), and real TUI launches under a hijacked `$HOME` (menu rendering, corruption and `.bak`/`.bak2` recovery warnings).
+
+### Changed
+- **Kimi K3 Migration**: moonshot flagship moves from `kimi-k2.7-code` to the official Claude Code alias `kimi-k3[1m]` (2.8T params, 1M context). The k2 series was officially discontinued on 2026-05-25; every k2 model (including `kimi-k2.7-code`) becomes an upgrade alias with one-click migration at startup. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` rises from 262144 to 1000000 with the 1M window.
+- **Anthropic Upgrade Targets**: opus 4.x series → `claude-opus-5`; sonnet 4.x / 3.7 → `claude-sonnet-5`.
+- **GLM Upgrade Aliases**: `glm-5.2[1m]` → `glm-5.3[1m]` (glm-4.x aliases repointed as well).
+- **Crypto Hardening**: PBKDF2 iterations raised from 10000 to 600000 (OWASP 2023) with the derived key cached once per process; decryption now dispatches by format — legacy 2-segment CBC payloads go straight to the legacy key (CBC is unauthenticated: a wrong key has a ~1/255 chance of accepting garbage via valid padding), while GCM tries current-then-legacy keys deterministically thanks to the auth tag. Old payloads upgrade transparently on next save.
+- **Runtime Config File Safety** (`~/.claude-launcher-config.json`): the duplicated defaults are unified into one source (`noFlicker: true`); a corrupt file is no longer silently overwritten with defaults; saves are atomic (tmp+rename); `saveConfig` returns a boolean contract; language saves preserve unrelated fields instead of clobbering the whole file.
+- DeepSeek (V4-Pro 0813 GA) and MiniMax (M3) are already current — no change this release.
+
+### Fixed
+- **Credential File Permissions**: config and backups (main/`.bak`/`.bak2`) are forced to 0600 on both save **and load** — 0644 files written by older versions tighten on load alone; exported plaintext JSON is also written 0600.
+- **Backup Rotation Crash Window**: a crash between the two rotation renames (main missing while `.bak` is valid) now recovers automatically on the next load instead of being treated as first-time usage; the save path self-heals main from `.bak` when the promote fails.
+- **No Unverified Writes Left on Disk**: a failed read-back/verification after promote is undone (restore `.bak`, or remove the unverified file on a first save); if the undo itself fails, the disk is reconciled against the intended write — eliminating the fork where a change reported "not saved" reappears after restart.
+- **Concurrent-Instance Protection (CAS)**: saves compare the disk state under the lock and refuse stale-snapshot overwrites, setting a `saveConflict` flag — ending silent last-writer-wins data loss. Refused saves roll memory back to the last persisted state; user-facing mutating APIs throw a clear error (caught and displayed at every TUI boundary), while statistics paths roll back silently to avoid aborting launches.
+- **Three-State Save Outcomes**: when the disk cannot be reconciled after a failed verify/undo (e.g. persistent read errors), the save is reported as `indeterminate` instead of a false "not saved" — memory is held at the block point, further blind saves are blocked, all mutating APIs run an indeterminate preflight BEFORE touching memory (UI-held aliased references never see ghost changes), and the surfaced error says the outcome could not be verified, never that the change was lost. A reload reconciles against the disk truth.
+- **Owner-Token Write Lock**: the lockfile carries a unique owner token; release only deletes a lock still owned by this manager, and the rotation renames are preceded by an ownership re-check — a writer suspended past the stale threshold, whose lock was taken over, aborts before touching main/`.bak` and cannot delete the successor's lock. (Residual micro-window between the ownership check and the rename chain is documented for an OS-level flock follow-up.)
+- **Launch-Stat Attribution**: `recordLaunchAttempt`/`recordSuccessfulLaunch`/`recordFailedLaunch`/`incrementActiveApiUsage` return `null` when the save is refused, and both launch paths install the rollback only when the optimistic attempt actually persisted — a refused save can no longer debit failCount with no matching usage/success record.
+- **Robustness Against Odd Configs**: `decrypt()` fails cleanly on null/non-string tokens instead of throwing (missing-token entries from old configs no longer crash the selection table or delete confirmation); the switch-mode refusal path resolves its promise instead of leaving the TUI unresponsive.
+- **Launcher Chain**: spawn now passes an args array and only uses a shell on Windows (removing the double-parsing metacharacter surface); a signal-killed child exits with 1 instead of a false 0; the connection test uses a strict hex-segment pattern so plaintext tokens containing colons are no longer misreported as failed decryptions.
+- **validateModel Prefix List**: added `kimi-`/`glm-`/`minimax-` (declarative hardening).
+- **Test Suite Robustness**: the locale parity test ignores macOS AppleDouble `._*.js` files; a new locale completeness test walks every predefined model key across all 11 languages.
+
+## [3.2.1] - 2026-08-14
+
+### Fixed
+- **Config Silently Lost on Startup (issue #11)**: `saveConfig()` wrote with a truncate-in-place `writeFileSync` — an interrupted write (double Ctrl+C, closed terminal, concurrent instances) could leave `~/.claude-launcher-apis.json` truncated, and `loadConfig()` then silently fell back to an empty config which the first-run wizard persisted over the real file, destroying it permanently.
+
+### Changed
+- **Atomic Crash-Safe Persistence**: saves now write to a temp file (fsynced), rotate the current file to `.bak`, `rename()` atomically into place, and verify by decrypting the file back. A failed verification rolls back from `.bak`. A lockfile (stale after 30s) stops concurrent instances from interleaving writes.
+- **Automatic Corruption Recovery**: on decrypt/parse/structure failure the loader promotes the `.bak` from the last successful save over the corrupt file and continues with that data.
+- **No More Silent Fallback**: if no usable config exists, the manager enters a `loadError` state — `isFirstTimeUsage()` stays `false` (the first-run wizard can no longer overwrite the corrupt file), `saveConfig()` refuses to write until `clearLoadError()` is called explicitly, the API management menu is blocked with a visible warning, and the main menu shows the reason. All 11 locales gained `warnings.config_load_error` / `warnings.config_recovered`.
+- **Authenticated Encryption (AES-256-GCM)**: config and auth tokens are now written as `iv:ciphertext:authTag`; any truncation or tampering fails decryption loudly instead of yielding garbage plaintext. Legacy 2-segment AES-256-CBC payloads remain readable and upgrade to GCM on next save.
+- **Test Suite**: locale parity test now ignores macOS AppleDouble `._*.js` files (platform-migration debris that broke the test on non-native volumes).
+
 ## [3.2.0] - 2026-06-14
 
 ### Added
