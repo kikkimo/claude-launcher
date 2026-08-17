@@ -760,5 +760,65 @@ test('blocked mutations under indeterminate leave memory at the indeterminate po
     assert.strictEqual(mgr.recordLaunchAttempt(), null, 'blocked stats returns null');
     assert.strictEqual(mgr.config.apis[0].usageCount, 0, 'blocked stats must not increment memory');
 });
+test('blocked mutations leave ALIASED references intact too (round 7: no ghost via UI-held refs)', () => {
+    const dir = tmpDir();
+    const mgr = new ApiManager(configPath(dir));
+    mgr.config = sampleConfig('AliasGuard');
+    mgr.saveConfig();
+
+    // UI-style aliasing: hold references BEFORE the blocked mutation
+    const heldApis = mgr.getApis();
+    const heldApi = mgr.getActiveApi();
+
+    mgr.saveOutcome = 'indeterminate';
+    mgr._indeterminateSnapshot = JSON.parse(JSON.stringify(mgr.config));
+
+    assert.throws(() => mgr.updateApiField(mgr.config.apis[0].id, 'name', 'GhostName'), /could not be verified/);
+    assert.strictEqual(heldApi.name, 'AliasGuard', 'held API reference must not carry the blocked rename');
+    assert.strictEqual(mgr.config.apis[0].name, 'AliasGuard');
+
+    assert.throws(() => mgr.removeApi(0), /could not be verified/);
+    assert.strictEqual(heldApis.length, 1, 'held apis array must not reflect the blocked removal');
+    assert.strictEqual(mgr.config.apis.length, 1);
+});
+
+// --- write-lock ownership (round 8/7 finding 1) ---
+
+test('stale takeover then original writer resumes: ownership check aborts before touching main', () => {
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+    const a = new ApiManager(cfg);
+    a.config = sampleConfig('LockOwner');
+    a.saveConfig();
+
+    // A acquires the lock and is then suspended past the stale threshold.
+    const lockPath = cfg + '.lock';
+    a._acquireWriteLock(lockPath);
+    const staleDate = new Date(Date.now() - 60000);
+    fs.utimesSync(lockPath, staleDate, staleDate);
+
+    // B takes over the stale lock and completes a full save.
+    const b = new ApiManager(cfg);
+    b.config = sampleConfig('LockTaker');
+    assert.strictEqual(b.saveConfig(), true, 'stale takeover save succeeds');
+
+    // A resumes: its save must be refused WITHOUT touching main/.bak
+    // (disk still holds B's data).
+    const before = fs.readFileSync(cfg, 'utf8');
+    assert.strictEqual(a.saveConfig(), false, 'resumed original writer must be refused');
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), before, "B's persisted data untouched");
+    const dec = decrypt(fs.readFileSync(cfg, 'utf8'));
+    assert.ok(dec.value.includes('LockTaker'), 'disk holds the lock taker generation');
+
+    // And A must not be able to delete a lock it no longer owns: while B
+    // holds the lock, A's release is a no-op on B's lockfile.
+    const b2 = new ApiManager(cfg);
+    assert.ok(b2._acquireWriteLock(lockPath), 'fresh writer acquires');
+    a._releaseWriteLock(lockPath); // A's stale token must not unlink B's lock
+    assert.ok(fs.existsSync(lockPath), "A must not delete B's lock on release");
+    assert.strictEqual(b2._ownsWriteLock(lockPath), true, 'B still owns the lock');
+    b2._releaseWriteLock(lockPath);
+});
+
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
