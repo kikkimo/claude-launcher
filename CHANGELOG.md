@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-08-17
+
+### Fixed
+- **Upgrade Prompt Told Users to Run a Command That Fails**: every update hint advertised `npm update -g @kikkimo/claude-launcher`. That form re-reifies the **entire** global package tree — npm itself included — so npm's finishing step tries to rewrite its own builtin `npmrc`. That file is mode 0444 under a Homebrew-installed Node (macOS) and lives under `C:\Program Files\` with the Windows installer, so the command aborts with `EACCES`/`EPERM` **after** the package has already been unpacked and linked — a successful upgrade that looks like a failure. All 23 occurrences (11 locales × `version.install_command` + `version_check.update_command`, plus the hardcoded hint in `claude-launcher`) now use `npm install -g @kikkimo/claude-launcher@latest`, which only reifies the target package. Reproduced and verified on Homebrew node@22.23.1 / npm 10.9.8.
+- **Korean Particle Agreement**: `version.install_command` kept 를 after a string that now ends in `@latest`; a closed syllable takes 을.
+
+### Added
+- **Troubleshooting Section** (both READMEs): global-install `EACCES`/`EPERM` — starting with how to tell whether it actually failed, since the package is normally already linked — plus moving the npm prefix under `$HOME`, why `sudo npm install -g` makes matters worse, the Windows PowerShell execution policy that blocks the generated `.ps1` shim, `cmd.exe` mangling the ANSI/box-drawing interface, and a missing `PATH` entry.
+- **Full Locale Key-Set Test** (`test/i18n-consistency.test.js`, wired into `npm test`): pins the upgrade command across all 11 locales, scans every shipped source file for the old command, and requires the locales directory to match the supported-language list. Existing locale tests only spot-check individual keys; this one holds all 11 packs to en's exact 563-key set, so a missing or stray translation now fails the suite.
+
 ## [3.3.0] - 2026-08-15
 
 ### Added

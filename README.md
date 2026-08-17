@@ -86,6 +86,69 @@ npm install
 node claude-launcher
 ```
 
+### Updating
+
+```bash
+npm install -g @kikkimo/claude-launcher@latest
+```
+
+> **Use `install -g ...@latest` rather than `npm update -g`.** `npm update -g` re-resolves your *entire* global package tree — npm itself included — so npm's finishing step tries to rewrite its own built-in `npmrc`. That file is read-only under a Homebrew-installed Node on macOS, and lives under `C:\Program Files\` with the Windows installer, so the command aborts with `EACCES`/`EPERM` even though the package installed fine. `npm install -g <pkg>@latest` only touches this package and is unaffected.
+
+## 🩺 Troubleshooting
+
+### Global install fails with `EACCES` / `EPERM`
+
+**First check whether it actually failed.** npm raises this error in its *final* bookkeeping step, after the package has already been unpacked and linked, so the tool is usually working:
+
+```bash
+claude-launcher
+```
+
+If the launcher starts, the error was harmless and you can ignore it.
+
+**If the command really is missing,** your npm global prefix points at a directory your user cannot write to. Move it under your home directory:
+
+```bash
+# macOS / Linux
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
+exec $SHELL -l
+npm install -g @kikkimo/claude-launcher@latest
+```
+
+On Windows, npm already installs global packages into a per-user directory (`%APPDATA%\npm`), so this is rarely needed — see the execution-policy note below instead.
+
+> **Do not run `sudo npm install -g`.** It succeeds, but leaves root-owned files in your npm cache and global directory, which makes every later install fail in harder-to-diagnose ways. Node version managers (`nvm`, `fnm`, `volta`) avoid the whole problem because their global directory lives in your home folder.
+
+### Windows: "running scripts is disabled on this system"
+
+npm installs a PowerShell shim alongside the command, and PowerShell's default execution policy refuses to run it:
+
+```
+claude-launcher.ps1 cannot be loaded because running scripts is disabled on this system.
+```
+
+Allow locally-created scripts for your own user (no administrator rights required):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Alternatively, invoke the batch shim directly: `claude-launcher.cmd`.
+
+### Windows: garbled characters or broken borders
+
+The launcher draws its interface with ANSI colours and box-drawing characters. Use **Windows Terminal** or **PowerShell 7**, both of which support them; the legacy `cmd.exe` console window renders them incorrectly.
+
+### `claude-launcher: command not found` after a successful install
+
+Your npm global `bin` directory is not on `PATH`. Find it and add it to your shell profile:
+
+```bash
+npm prefix -g       # bin directory is <prefix>/bin on macOS/Linux, <prefix> itself on Windows
+```
+
 ## 🎮 Usage
 
 ### Available Options

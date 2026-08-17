@@ -2326,7 +2326,7 @@ async function showVersionUpdateCheck() {
                 screen.write(colors.green + '   ' + await i18n.t('version_check.latest_version', result.latestVersion) + colors.reset + '\n');
                 screen.write('\n');
                 screen.write(colors.yellow + '💡 ' + await i18n.t('version_check.update_command') + colors.reset + '\n');
-                screen.write(colors.yellow + '   npm update -g @kikkimo/claude-launcher' + colors.reset + '\n');
+                screen.write(colors.yellow + '   npm install -g @kikkimo/claude-launcher@latest' + colors.reset + '\n');
             } else {
                 // Already up to date
                 screen.write(colors.green + '✅ ' + await i18n.t('version_check.up_to_date') + colors.reset + '\n');
