@@ -580,6 +580,34 @@ test('S-9a: a miss never disables later recoveries (no per-process sweep short-c
     });
 });
 
+test('m-I: a failed probe must not invalidate the negative cache', () => {
+    // The fingerprint keys the memo. Folding the probe result into it means one
+    // flaky ioreg call throws away every remembered miss and re-sweeps — which
+    // is the cost MJ-9/MJ-10 exist to remove.
+    // Stripping PATH no longer makes the probe fail — it runs by absolute path
+    // since M-2(a) — so the difference has to be asserted against the formula
+    // itself, written out by hand as with the key oracles.
+    const { candidateFingerprint } = require('../lib/crypto');
+    const machineKey = require('../lib/machine-key');
+    resetKeyCachesForTests();
+
+    const suffix = os.userInfo().username + os.platform();
+    const hostnamesOnly = nodeCrypto.createHash('sha256')
+        .update(machineKey.legacyHostnameCandidates().map(h => h + suffix).join('\u0000'))
+        .digest('hex').slice(0, 16);
+    assert.strictEqual(candidateFingerprint(), hostnamesOnly,
+        'the fingerprint must cover the hostname families only');
+
+    const probed = machineKey.probe(process.platform);
+    if (probed && probed.id) {
+        const withProbe = nodeCrypto.createHash('sha256')
+            .update(machineKey.identityCandidates().map(h => h + suffix).join('\u0000'))
+            .digest('hex').slice(0, 16);
+        assert.notStrictEqual(candidateFingerprint(), withProbe,
+            'including the probe would make one flaky ioreg call discard every remembered miss');
+    }
+});
+
 console.log('\n--- B10: the reset contract clears every key cache ---\n');
 
 test('B10: resetKeyCachesForTests clears registered recovered keys too', () => {

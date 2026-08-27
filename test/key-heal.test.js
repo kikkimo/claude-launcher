@@ -720,6 +720,23 @@ test('MJ-9: both alternating candidate sets stay remembered, so neither re-sweep
         `then ${againBar3.toFixed(0)}/${againBar2.toFixed(0)}ms`);
 });
 
+test('m-I: the remembered fingerprint set stays bounded', () => {
+    const lost = nodeCrypto.randomBytes(32);
+    const ws = seedDriftedWorkspace('mibound', {
+        outerKey: hostnameEraKey('Baz-2', 600000),
+        tokenKeys: [hostnameEraKey('Baz-2', 600000), lost],
+    });
+    for (const host of ['Baz-3', 'Baz-4', 'Baz-5', 'Baz-6', 'Baz-7', 'Baz-8']) {
+        resetKeyCachesForTests();
+        loadUnderHostname(ws.configFile, host);
+    }
+    const memo = JSON.parse(fs.readFileSync(ws.configFile + '.key-scan-misses', 'utf8'));
+    for (const [digest, fingerprints] of Object.entries(memo)) {
+        assert.ok(Array.isArray(fingerprints) && fingerprints.length <= 4,
+            `${digest} remembers ${fingerprints.length} fingerprints; an unbounded set is a slow leak`);
+    }
+});
+
 test('MJ-9: the negative cache is not user data and never reaches the config or an export', () => {
     const lost = nodeCrypto.randomBytes(32);
     const ws = seedDriftedWorkspace('mj9b', {
@@ -733,6 +750,13 @@ test('MJ-9: the negative cache is not user data and never reaches the config or 
     const reopened = new ApiManager(ws.configFile);
     assert.strictEqual(reopened.config._keyScanMisses, undefined,
         'bookkeeping about scan results does not belong inside the user\'s encrypted config');
+
+    // And the title's second half, which used to be asserted nowhere: an export
+    // must not carry it either.
+    reopened.config.apis[1].authToken = reopened.config.apis[0].authToken; // make both exportable
+    const exported = JSON.parse(reopened.exportConfigAuthenticated());
+    assert.strictEqual(exported._keyScanMisses, undefined);
+    assert.ok(!JSON.stringify(exported).includes('_keyScanMisses'));
 });
 
 console.log('\n=== M2: a permanently unrecoverable field must not tax every startup ===\n');

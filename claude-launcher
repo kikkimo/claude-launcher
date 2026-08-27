@@ -2067,9 +2067,14 @@ async function showMenu() {
     // A snapshot that outlived every generation holds the only remaining copy
     // of the user's APIs. It is never consumed automatically, so saying it is
     // there is the difference between recovering and losing it.
-    if (apiManager.snapshotNotice && apiManager.snapshotNotice.readable) {
-        healthLines.push(colors.bright + colors.yellow + '  ⚠️  ' +
-            i18n.tSync('warnings.snapshot_available', apiManager.snapshotNotice.path) + colors.reset);
+    if (apiManager.snapshotNotice) {
+        // Both cases must speak. Silence on the unreadable one is the dangerous
+        // half: the wizard offers a clean fresh start while the only file that
+        // still holds the user's tokens sits next to it, and the only lever
+        // they can find is deleting it.
+        healthLines.push(colors.bright + colors.yellow + '  ⚠️  ' + i18n.tSync(
+            apiManager.snapshotNotice.readable ? 'warnings.snapshot_available' : 'warnings.snapshot_unreadable',
+            apiManager.snapshotNotice.path) + colors.reset);
     }
 
     // Set-aside configs are only ever revisited on request, so say they exist.
@@ -2258,6 +2263,14 @@ async function exportConfiguration() {
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_file_saved', filePath) + colors.reset + '\n');
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_export_dir', exportDir) + colors.reset + '\n');
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_filename', filename) + colors.reset + '\n');
+        // Entries whose stored token could not be decrypted are skipped rather
+        // than blocking the whole export — but skipping them without saying so
+        // is the silence this was meant to replace.
+        const skippedExports = JSON.parse(exportData).skipped || [];
+        if (skippedExports.length > 0) {
+            screen.write(colors.yellow + `  • ` + i18n.tSync('import_export.export.details_skipped',
+                skippedExports.map(entry => entry.name).join(', ')) + colors.reset + '\n');
+        }
         screen.write('\n');
 
         // Open file with default application

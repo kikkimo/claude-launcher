@@ -244,6 +244,129 @@ test('E3a: the quarantine action is gated on that confirmation', () => {
         'cannot fall through to quarantining the config');
 });
 
+console.log('\n=== MJ-11..MJ-13: what the screen actually says (positive assertions) ===\n');
+
+/**
+ * Plant a snapshot beside a config that no longer has any generation, i.e. the
+ * orphan state. `reachable` decides whether the current machine can open it.
+ */
+function plantOrphanSnapshot(home, { reachable }) {
+    const cfg = path.join(home, '.claude-launcher-apis.json');
+    const key = reachable ? unreachableKey() : crypto.randomBytes(32);
+    const body = JSON.stringify({
+        apis: [{ id: 'o1', name: 'FromSnapshot', provider: 'custom', baseUrl: 'https://a.example.com',
+            authToken: gcmWithKey('sk-orphan-token-01', key), model: 'claude-sonnet-4' }],
+        activeIndex: 0, version: '2.0.0', createdAt: '', exportPassword: null, passwordSkipped: true,
+    }, null, 2);
+    const ciphertext = gcmWithKey(body, key);
+    const digest = crypto.createHash('sha256').update(ciphertext).digest('hex').slice(0, 12);
+    const snapshotPath = `${cfg}.pre-key-migration.${digest}`;
+    fs.writeFileSync(snapshotPath, JSON.stringify({
+        v: 1, source: 'legacy-candidate', idHint: 'aaaaaaaaaaaa',
+        savedAt: '2026-01-01T00:00:00.000Z', ciphertext,
+    }, null, 2));
+    return snapshotPath;
+}
+
+test('MJ-12: a READABLE orphan snapshot is named on screen', () => {
+    // The MJ-5 fix deliberately moved the guarantee from "suppress the wizard"
+    // to "say it on the banner". Nothing asserted the banner half, so the whole
+    // guarantee could disappear while the suite stayed green.
+    const home = makeHome('orphan-readable');
+    const sidecar = path.join(home, 'machine-key.json');
+    const snapshotPath = plantOrphanSnapshot(home, { reachable: true });
+
+    const run = runLauncher(home, sidecar, '', 'faraway-78');
+    const out = stripAnsi(run.stdout);
+    assert.strictEqual(run.status, 0);
+    assert.ok(out.includes(snapshotPath),
+        `the last copy of the user's APIs must be named on screen:\n${out.slice(0, 900)}`);
+});
+
+test('MJ-11: an UNREADABLE orphan snapshot is reported too, on screen', () => {
+    // Silence here is the dangerous case: the file cannot be opened right now,
+    // the wizard offers a clean fresh start, and the only lever the user can
+    // find is deleting the very file that still holds their tokens.
+    const home = makeHome('orphan-unreadable');
+    const sidecar = path.join(home, 'machine-key.json');
+    const snapshotPath = plantOrphanSnapshot(home, { reachable: false });
+
+    const run = runLauncher(home, sidecar, '');
+    const out = stripAnsi(run.stdout);
+    assert.strictEqual(run.status, 0);
+    assert.ok(out.includes(snapshotPath),
+        `an unreadable snapshot must still be named:\n${out.slice(0, 900)}`);
+    assert.ok(/do not delete|don't delete|keep it/i.test(out),
+        'and the user must be told not to delete it, since it may open again later');
+});
+
+test('m-H: with both kinds present, the readable one is the one offered', () => {
+    const home = makeHome('orphan-both');
+    const sidecar = path.join(home, 'machine-key.json');
+    plantOrphanSnapshot(home, { reachable: false });
+    const readablePath = plantOrphanSnapshot(home, { reachable: true });
+
+    const out = stripAnsi(runLauncher(home, sidecar, '', 'faraway-78').stdout);
+    assert.ok(out.includes(readablePath),
+        `the snapshot that can actually be recovered must be the one surfaced:\n${out.slice(0, 900)}`);
+});
+
+test('MJ-13: every snapshot path the banner prints exists on disk', () => {
+    // The banner used to construct the pre-content-addressing name by hand, so
+    // it named a file that is not there — a recovery instruction pointing at a
+    // missing file is worse than none.
+    const home = makeHome('paths');
+    const sidecar = path.join(home, 'machine-key.json');
+    const cfg = path.join(home, '.claude-launcher-apis.json');
+    seedUnreadableHome(home);
+
+    // Heal (creates a snapshot), then break one token beyond recovery so the
+    // "these tokens could not be decrypted" line, which names the snapshot, is
+    // rendered.
+    inChild(home, sidecar, `
+        const os = require('os');
+        os.hostname = () => 'faraway-77';
+        crypto.resetKeyCachesForTests();
+        return { healed: new ApiManager(configFile).keyHealOutcome };
+    `);
+    inChild(home, sidecar, `
+        const nodeCrypto = require('crypto');
+        const mgr = new ApiManager(configFile);
+        const lost = nodeCrypto.randomBytes(32);
+        const iv = nodeCrypto.randomBytes(12);
+        const c = nodeCrypto.createCipheriv('aes-256-gcm', lost, iv);
+        let ct = c.update('sk-doomed', 'utf8', 'hex'); ct += c.final('hex');
+        mgr.config.apis[0].authToken = iv.toString('hex') + ':' + ct + ':' + c.getAuthTag().toString('hex');
+        mgr.saveConfig();
+        return null;
+    `);
+
+    const out = stripAnsi(runLauncher(home, sidecar, '').stdout);
+    const mentioned = out.match(new RegExp(cfg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.pre-key-migration[^\\s,]*', 'g')) || [];
+    assert.ok(mentioned.length > 0,
+        `the banner must point at the preserved ciphertext:\n${out.slice(0, 1200)}`);
+    for (const candidate of mentioned) {
+        assert.ok(fs.existsSync(candidate),
+            `the banner named ${candidate}, which does not exist — recovery advice must be followable`);
+    }
+});
+
+test('MJ-7b: the export flow tells the user which entries it left out', () => {
+    // Structural guard, labelled as one: the export summary is reachable only
+    // through a multi-step TUI drive this harness cannot deliver (see the file
+    // header). Skipping an entry silently would put us back where C7 started.
+    const source = fs.readFileSync(path.join(REPO, 'claude-launcher'), 'utf8');
+    const start = source.indexOf('async function exportConfiguration(');
+    assert.ok(start > 0);
+    const body = source.slice(start, source.indexOf('\nasync function', start + 10));
+    // Pin the data flow, not the word: an empty literal named `skipped` would
+    // satisfy a looser check while telling the user nothing.
+    assert.ok(/JSON\.parse\(exportData\)\.skipped/.test(body),
+        'the summary must read the skipped list from what was actually exported');
+    assert.ok(/details_skipped/.test(body),
+        'and render it, not merely compute it');
+});
+
 console.log('\n=== B1: a broken sidecar must not be diagnosed as a broken config ===\n');
 
 test('B1: corrupt key material names the sidecar and never advises deleting the config', () => {

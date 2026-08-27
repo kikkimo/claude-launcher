@@ -51,21 +51,19 @@ const REAL_FIXED = [REAL_CONFIG, REAL_CONFIG + '.bak', REAL_CONFIG + '.bak2',
  */
 function realVariants() {
     const base = path.basename(REAL_CONFIG);
+    const sidecarBase = path.basename(REAL_SIDECAR);
     const found = [];
     try {
         for (const name of fs.readdirSync(REAL_HOME)) {
-            if (!name.startsWith(base)) continue;
-            if (/\.pre-key-migration|\.unreadable\.|\.probe-attempts$|\.key-scan-misses$|\.lock$|\.tmp$/.test(name)) {
-                found.push(path.join(REAL_HOME, name));
-            }
+            // createExclusive's temp files carry a LEADING dot ('.<base>.tmp-…'),
+            // so a startsWith(base) test misses them — and what they hold while
+            // they exist is a snapshot document, i.e. the user's ciphertext.
+            const stem = name.startsWith('.') ? name.slice(1) : name;
+            if (!stem.startsWith(base) && !stem.startsWith(sidecarBase)) continue;
+            if (stem === base || stem === sidecarBase) continue; // fixed list covers these
+            found.push(path.join(REAL_HOME, name));
         }
     } catch (_) { /* unreadable home: nothing to compare */ }
-    try {
-        const sidecarBase = path.basename(REAL_SIDECAR);
-        for (const name of fs.readdirSync(REAL_HOME)) {
-            if (name.startsWith(sidecarBase) && name !== sidecarBase) found.push(path.join(REAL_HOME, name));
-        }
-    } catch (_) { /* ignore */ }
     return found;
 }
 

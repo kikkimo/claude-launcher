@@ -338,14 +338,33 @@ test('M3: retryable probe failures are bounded, not retried forever', () => {
 test('M3: a successful probe clears the timeout tally', () => {
     const dir = freshSidecarDir('m3clear');
     const attemptsPath = path.join(dir, 'attempts.json');
+    // MAX_PROBE_RETRIES - 1 timeouts: one short of the threshold, so a tally
+    // that survives the success makes the NEXT timeout cross it. With only two
+    // this assertion passed whether or not the reset happened.
     machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
     machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+    machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+
     const good = machineKey.pinDecision({ source: 'ioreg', id: 'UUID-1' }, 'somehost-3', { attemptsPath });
     assert.strictEqual(good.pin, true);
-    // A transient patch of slowness must not carry over and cause a later
-    // single timeout to pin the hostname.
+    assert.strictEqual(fs.existsSync(attemptsPath), false,
+        'the tally file itself must be gone after a success');
+
     const next = machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
-    assert.strictEqual(next.pin, false, 'the tally must have been reset by the success');
+    assert.strictEqual(next.pin, false,
+        'a tally carried across a success would pin the DRIFTING hostname — the bug this release removes');
+});
+
+test('m-I: the tally file is cleaned up once the decision is pinned', () => {
+    const dir = freshSidecarDir('m3litter');
+    const attemptsPath = path.join(dir, 'attempts.json');
+    let decision;
+    for (let i = 0; i < 4; i++) {
+        decision = machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+    }
+    assert.strictEqual(decision.pin, true, 'precondition: the fallback is pinned by now');
+    assert.strictEqual(fs.existsSync(attemptsPath), false,
+        'the counter has served its purpose and must not be left behind indefinitely');
 });
 
 console.log('\n=== machine-key: probing stays lazy (S-5) ===\n');
