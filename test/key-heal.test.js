@@ -555,6 +555,146 @@ test('M8: a throwing recovery scan degrades to "no heal this run" instead of cra
     assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before);
 });
 
+console.log('\n=== BL-5: the no-migration-without-a-snapshot rule must cover ordinary saves ===\n');
+
+/** A config on a healthy pinned identity, then the sidecar is removed. */
+function seedPinnedThenSidecarLost(label) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cl-bl5-${label}-`));
+    const configFile = path.join(dir, 'apis.json');
+    const sidecar = path.join(dir, 'machine.json');
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = sidecar;
+    resetKeyCachesForTests();
+    // Pinned under a name that the candidate sweep can still reach later, so
+    // the config stays READABLE while the runtime identity is a different,
+    // unpinned one — the state the reproduction needs.
+    fs.writeFileSync(sidecar, JSON.stringify({ v: 1, source: 'hostname', id: 'oldhost-2' }));
+
+    const mgr = new ApiManager(configFile);
+    mgr.addApi('https://a.example.com', 'sk-bl5-alpha-000001', 'claude-sonnet-4', 'Alpha');
+    mgr.addApi('https://b.example.com', 'sk-bl5-beta-000002', 'claude-sonnet-4', 'Beta');
+    const healthy = fs.readFileSync(configFile, 'utf8');
+
+    // The sidecar is gone (cleanup, a new machine, or following the advice to
+    // remove it) and the identity cannot be pinned this run.
+    fs.rmSync(sidecar);
+    resetKeyCachesForTests();
+    return { dir, configFile, sidecar, healthy };
+}
+
+/** Load with the identity unpinnable: probe unavailable AND sidecar unwritable. */
+function loadUnpinned(configFile, hostname) {
+    const unwritable = path.join(path.dirname(configFile), 'no-such-dir', 'machine.json');
+    const realPath = process.env.PATH;
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = unwritable;
+    process.env.PATH = '/nonexistent-bin'; // the probe cannot run either
+    os.hostname = () => hostname;
+    resetKeyCachesForTests();
+    try {
+        return new ApiManager(configFile);
+    } finally {
+        os.hostname = realHostname;
+        process.env.PATH = realPath;
+    }
+}
+
+test('BL-5: an ordinary save must not migrate the key generation the heal refused', () => {
+    // The heal correctly refuses to re-encrypt under an identity it cannot
+    // stand behind. But it returned BEFORE taking a snapshot, and set no latch —
+    // so the very next user action re-encrypted the whole blob under that same
+    // drifting key, with no pre-state copy anywhere.
+    const ws = seedPinnedThenSidecarLost('save');
+    const mgr = loadUnpinned(ws.configFile, 'oldhost-3');
+    assert.strictEqual(mgr.keyHealOutcome, 'skipped:identity-unpinned', 'precondition');
+    assert.strictEqual(mgr.config.apis.length, 2, 'and the config is readable');
+
+    // Exactly one ordinary user action.
+    mgr.setActiveApi(1);
+
+    const snapshots = snapshotsFor(ws.configFile);
+    assert.ok(snapshots.length > 0,
+        'if a save migrates the key generation, the pre-state must have been preserved first');
+    assert.ok(snapshots.map(snapshotCiphertext).includes(ws.healthy),
+        'and the preserved bytes must be the ones the migration replaced');
+});
+
+test('BL-5: the tokens survive that save', () => {
+    // The A/B that matters: not saving keeps both tokens, so the save is the
+    // cause of the loss rather than something that was going to happen anyway.
+    const ws = seedPinnedThenSidecarLost('tokens');
+    const mgr = loadUnpinned(ws.configFile, 'oldhost-3');
+    mgr.setActiveApi(1);
+
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = ws.sidecar;
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.loadError, null,
+        `the config must still open once the identity is pinnable again: ${JSON.stringify(reopened.loadError)}`);
+    assert.strictEqual(reopened.config.apis.length, 2);
+});
+
+test('BL-5: promote-failed is the same hole and must behave the same', () => {
+    const ws = seedDriftedWorkspace('bl5promote');
+    const healthy = fs.readFileSync(ws.configFile, 'utf8');
+    fs.rmSync(ws.configFile);
+    fs.mkdirSync(ws.configFile);
+    fs.writeFileSync(path.join(ws.configFile, 'blocker'), 'x');
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyHealOutcome, 'skipped:promote-failed', 'precondition');
+    // main is a directory, so an ordinary save cannot land anyway; what matters
+    // is that the skip does not leave the migration invariant unguarded.
+    assert.strictEqual(mgr._keyMigrationBlocked, true,
+        'a skip that bypassed the snapshot must block the ordinary save path too');
+});
+
+console.log('\n=== MJ-9: a flapping fingerprint must not eat a backup generation per launch ===\n');
+
+test('MJ-9: alternating hostnames do not rewrite the config on every launch', () => {
+    // The target population of this whole release: a laptop moving between two
+    // networks, so the name alternates. With one fingerprint per digest the
+    // memo could never hold both, so every launch re-swept AND re-saved —
+    // rotating .bak/.bak2 with no user action at all, which quietly consumes
+    // the rollback value of both backup generations.
+    const lost = nodeCrypto.randomBytes(32);
+    const ws = seedDriftedWorkspace('mj9', {
+        outerKey: hostnameEraKey('Foo-2', 600000),
+        tokenKeys: [hostnameEraKey('Foo-2', 600000), lost],
+    });
+
+    const launch = (hostname) => {
+        resetKeyCachesForTests();
+        os.hostname = () => hostname;
+        try {
+            const before = fs.readFileSync(ws.configFile, 'utf8');
+            const mgr = new ApiManager(ws.configFile);
+            return { rewrote: fs.readFileSync(ws.configFile, 'utf8') !== before, mgr };
+        } finally {
+            os.hostname = realHostname;
+        }
+    };
+
+    launch('Foo-3');           // first: heals, expected to write
+    launch('Foo-3');           // memo warm
+    const alternating = ['Foo-2', 'Foo-3', 'Foo-2', 'Foo-3'].map(h => launch(h).rewrote);
+    assert.deepStrictEqual(alternating, [false, false, false, false],
+        'once both names are known, no launch may rewrite the config on its own');
+});
+
+test('MJ-9: the negative cache is not user data and never reaches the config or an export', () => {
+    const lost = nodeCrypto.randomBytes(32);
+    const ws = seedDriftedWorkspace('mj9b', {
+        outerKey: hostnameEraKey('fixedhost-2', 600000),
+        tokenKeys: [hostnameEraKey('fixedhost-2', 600000), lost],
+    });
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyRecoveryReport.unrecoverable.length, 1, 'precondition');
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.config._keyScanMisses, undefined,
+        'bookkeeping about scan results does not belong inside the user\'s encrypted config');
+});
+
 console.log('\n=== M2: a permanently unrecoverable field must not tax every startup ===\n');
 
 test('M2: a miss is remembered, so the next load pays nothing', () => {
