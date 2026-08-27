@@ -12,6 +12,8 @@
  *   E. TUI smoke under hijacked $HOME (menu renders; corruption/recovery warnings show)
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const { execFileSync, spawnSync } = require('child_process');
 const crypto = require('crypto');
@@ -43,12 +45,28 @@ function tmpDir(prefix) {
     return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-function machineId() {
+// Hand-written key oracles (never borrowed from production — see B14):
+// pre-fix ciphertext derives from os.hostname(), current ciphertext from the
+// pinned machine id. Only the id itself is read out of the sidecar.
+
+function legacyMachineId() {
     return os.hostname() + os.userInfo().username + os.platform();
 }
 
+function stableMachineId() {
+    const sidecar = process.env.CLAUDE_LAUNCHER_KEY_FILE;
+    if (!fs.existsSync(sidecar)) encrypt('sidecar-warmup');
+    return JSON.parse(fs.readFileSync(sidecar, 'utf8')).id + os.userInfo().username + os.platform();
+}
+
+/** Key of the pre-fix hostname era, at a chosen iteration count. */
+function deriveLegacyKey(iterations) {
+    return crypto.pbkdf2Sync(legacyMachineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+}
+
+/** Current key. */
 function deriveKey(iterations) {
-    return crypto.pbkdf2Sync(machineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+    return crypto.pbkdf2Sync(stableMachineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
 }
 
 /** AES-256-GCM iv:ct:tag hex payload with an externally derived key. */
@@ -157,7 +175,7 @@ test('E2E B: legacy 10000-iteration CBC whole-file payload loads via fallback an
         exportPassword: null, passwordSkipped: false,
     };
     const json = JSON.stringify(legacyConfig, null, 2);
-    fs.writeFileSync(cfg, cbcWithKey(json, deriveKey(10000)));
+    fs.writeFileSync(cfg, cbcWithKey(json, deriveLegacyKey(10000)));
 
     const mgr = new ApiManager(cfg);
     assert.strictEqual(mgr.loadError, null, 'legacy CBC file must load through the fallback');

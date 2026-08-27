@@ -1,0 +1,363 @@
+/**
+ * Tests for lib/machine-key.js — the stable machine identity that replaces
+ * os.hostname() as the encryption key input.
+ *
+ * Background: os.hostname() is unstable on macOS when `scutil --get HostName`
+ * is unset — gethostname() then falls back to the DHCP/mDNS name, which drifts
+ * with network changes, DHCP renewals and Bonjour dedup suffixes (-2/-3/-4).
+ * Key material derived from it silently rotates and locks the user out of
+ * their own config.
+ *
+ * Design invariant under test: NO identity mode is unrecoverable. Every
+ * `source` is either deterministically re-derivable (ioreg / machine-id /
+ * MachineGuid) or inside the legacy hostname candidate set.
+ *
+ * Fixture honesty: the darwin ioreg fixture is real output captured from a
+ * live machine (values sanitized — the UUID is synthetic and the serial
+ * number is removed). The linux and win32 fixtures are format-accurate but
+ * NOT captured from real hardware; this repo has no CI and those branches are
+ * never executed on real Windows/Linux before merge. That is a stated blind
+ * spot, not a claim of coverage.
+ */
+
+require('./helpers/isolate-key-material');
+
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+let passed = 0;
+let failed = 0;
+
+function test(name, fn) {
+    try {
+        fn();
+        passed++;
+        console.log(`  ✓ ${name}`);
+    } catch (e) {
+        failed++;
+        console.log(`  ✗ ${name}`);
+        console.log(`    ${e.message}`);
+    }
+}
+
+const machineKey = require('../lib/machine-key');
+
+function freshSidecarDir(label) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cl-mk-${label}-`));
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = path.join(dir, 'machine.json');
+    machineKey.resetForTests();
+    return dir;
+}
+
+// ---------------------------------------------------------------------------
+// Real captured ioreg output (sanitized). Shape is byte-for-byte what
+// `ioreg -rd1 -c IOPlatformExpertDevice` prints on macOS 15.
+// ---------------------------------------------------------------------------
+const IOREG_REAL = [
+    '+-o J716sAP  <class IOPlatformExpertDevice, id 0x100000376, registered, matched, active, busy 0 (540378 ms), retain 44>',
+    '    {',
+    '      "IOPolledInterface" = "AppleARMWatchdogTimerHibernateHandler is not serializable"',
+    '      "#address-cells" = <02000000>',
+    '      "AAPL,phandle" = <01000000>',
+    '      "IOBusyInterest" = "IOCommand is not serializable"',
+    '      "target-type" = <"J716s">',
+    '      "country-of-origin" = <"VNM">',
+    '      "IOPlatformUUID" = "A0C5A880-EE6D-582D-8836-9C77080D904A"',
+    '      "IOPlatformSerialNumber" = "REDACTED"',
+    '      "compatible" = <"J716sAP","Mac16,7","AppleARM">',
+    '    }',
+    '',
+].join('\n');
+
+const IOREG_NO_UUID = IOREG_REAL.split('\n').filter(l => !l.includes('IOPlatformUUID')).join('\n');
+
+// Format-accurate `reg query` output (not captured from real hardware).
+const REG_QUERY_REAL = [
+    '',
+    'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography',
+    '    MachineGuid    REG_SZ    4c4c4544-0046-5710-8034-c4c04f4d3332',
+    '',
+].join('\r\n');
+
+/** Minimal injectable io: execFileSync + readFileSync stubs. */
+function io({ exec = {}, files = {} } = {}) {
+    const calls = [];
+    return {
+        calls,
+        execFileSync(cmd, args, opts) {
+            calls.push({ cmd, args, opts });
+            const entry = exec[cmd];
+            if (entry === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+            if (entry instanceof Error) throw entry;
+            return entry;
+        },
+        readFileSync(p) {
+            if (!(p in files)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+            if (files[p] instanceof Error) throw files[p];
+            return files[p];
+        },
+    };
+}
+
+console.log('\n=== machine-key: sidecar pin (R1, E4) ===\n');
+
+test('R1: first call creates the sidecar at CLAUDE_LAUNCHER_KEY_FILE', () => {
+    freshSidecarDir('r1');
+    const identity = machineKey.getStableIdentity();
+    assert.ok(identity && typeof identity.id === 'string' && identity.id.length > 0,
+        'identity.id must be a non-empty string');
+    assert.ok(fs.existsSync(process.env.CLAUDE_LAUNCHER_KEY_FILE),
+        'sidecar file must exist after the first call');
+});
+
+test('R1: sidecar holds {v, source, id} and reports a known source', () => {
+    freshSidecarDir('r1b');
+    const identity = machineKey.getStableIdentity();
+    const onDisk = JSON.parse(fs.readFileSync(process.env.CLAUDE_LAUNCHER_KEY_FILE, 'utf8'));
+    assert.strictEqual(onDisk.v, 1);
+    assert.strictEqual(onDisk.id, identity.id);
+    assert.strictEqual(onDisk.source, identity.source);
+    assert.ok(['ioreg', 'machine-id', 'dbus-machine-id', 'machine-guid', 'hostname'].includes(onDisk.source),
+        `unexpected source: ${onDisk.source}`);
+    assert.strictEqual(identity.pinned, true);
+});
+
+test('R1: the pin is honored — a second derivation reuses the sidecar id', () => {
+    const dir = freshSidecarDir('r1c');
+    const first = machineKey.getStableIdentity().id;
+    // Rewrite the sidecar with a value that probing could never produce:
+    // if the pin is honored this is what comes back.
+    fs.writeFileSync(path.join(dir, 'machine.json'),
+        JSON.stringify({ v: 1, source: 'ioreg', id: 'pinned-value-not-probeable' }));
+    machineKey.resetForTests();
+    const second = machineKey.getStableIdentity();
+    assert.notStrictEqual(first, 'pinned-value-not-probeable');
+    assert.strictEqual(second.id, 'pinned-value-not-probeable',
+        'sidecar must win over probing');
+    assert.strictEqual(second.pinned, true);
+});
+
+test('E4: sidecar is created owner-only (0600)', () => {
+    if (process.platform === 'win32') return; // no POSIX modes
+    freshSidecarDir('e4');
+    machineKey.getStableIdentity();
+    const mode = fs.statSync(process.env.CLAUDE_LAUNCHER_KEY_FILE).mode & 0o777;
+    assert.strictEqual(mode, 0o600, `expected 0600, got 0${mode.toString(8)}`);
+});
+
+console.log('\n=== machine-key: fail closed on anomalies (R2, B5) ===\n');
+
+test('R2: a corrupt sidecar throws KeyMaterialError', () => {
+    const dir = freshSidecarDir('r2');
+    fs.writeFileSync(path.join(dir, 'machine.json'), '{ this is not json');
+    assert.throws(() => machineKey.getStableIdentity(), (e) => e.name === 'KeyMaterialError');
+});
+
+test('R2: a corrupt sidecar is NEVER overwritten', () => {
+    const dir = freshSidecarDir('r2b');
+    const sidecar = path.join(dir, 'machine.json');
+    const corrupt = '{ this is not json';
+    fs.writeFileSync(sidecar, corrupt);
+    try { machineKey.getStableIdentity(); } catch (_) { /* expected */ }
+    assert.strictEqual(fs.readFileSync(sidecar, 'utf8'), corrupt,
+        'corrupt sidecar bytes must be preserved byte-for-byte');
+});
+
+test('R2: valid JSON with an empty id also fails closed', () => {
+    const dir = freshSidecarDir('r2c');
+    fs.writeFileSync(path.join(dir, 'machine.json'), JSON.stringify({ v: 1, source: 'ioreg', id: '' }));
+    assert.throws(() => machineKey.getStableIdentity(), (e) => e.name === 'KeyMaterialError');
+});
+
+test('B5: an unwritable sidecar path degrades to a deterministic identity, never random', () => {
+    freshSidecarDir('b5');
+    // A path whose parent directory does not exist: creation must fail.
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = path.join(os.tmpdir(), 'cl-mk-no-such-dir-xyz', 'machine.json');
+    machineKey.resetForTests();
+    const first = machineKey.getStableIdentity();
+    assert.ok(first.id.length > 0, 'must still yield an identity');
+    assert.strictEqual(first.pinned, false, 'must report that it could not be pinned');
+    assert.ok(machineKey.getWarnings().length > 0, 'must record a warning');
+    machineKey.resetForTests();
+    const second = machineKey.getStableIdentity();
+    assert.strictEqual(second.id, first.id,
+        'unpinned identity must be deterministic across processes (never a random key)');
+});
+
+test('B5: an existing sidecar written by a concurrent winner is adopted, not clobbered', () => {
+    const dir = freshSidecarDir('b5b');
+    const sidecar = path.join(dir, 'machine.json');
+    const winner = JSON.stringify({ v: 1, source: 'ioreg', id: 'winner-id-from-other-process' });
+    fs.writeFileSync(sidecar, winner);
+    const identity = machineKey.getStableIdentity();
+    assert.strictEqual(identity.id, 'winner-id-from-other-process');
+    assert.strictEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')).id, 'winner-id-from-other-process');
+});
+
+console.log('\n=== machine-key: platform probing (R3, B12) ===\n');
+
+test('R3 darwin: IOPlatformUUID is extracted from real ioreg output', () => {
+    const result = machineKey.probe('darwin', io({ exec: { ioreg: IOREG_REAL } }));
+    assert.ok(result, 'probe must succeed');
+    assert.strictEqual(result.source, 'ioreg');
+    assert.strictEqual(result.id, 'A0C5A880-EE6D-582D-8836-9C77080D904A');
+});
+
+test('R3 darwin: ioreg output without a UUID probes as failure', () => {
+    assert.strictEqual(machineKey.probe('darwin', io({ exec: { ioreg: IOREG_NO_UUID } })), null);
+});
+
+test('R3 darwin: a throwing/missing ioreg probes as failure', () => {
+    assert.strictEqual(machineKey.probe('darwin', io({})), null);
+});
+
+test('R3 linux: /etc/machine-id is used when valid', () => {
+    const result = machineKey.probe('linux', io({
+        files: { '/etc/machine-id': 'd4f1a0b6c8e24d1fa9b7e3c5d6072a11\n' },
+    }));
+    assert.ok(result);
+    assert.strictEqual(result.source, 'machine-id');
+    assert.strictEqual(result.id, 'd4f1a0b6c8e24d1fa9b7e3c5d6072a11');
+});
+
+test('R3 linux: an EMPTY /etc/machine-id is a failure, and dbus is tried next', () => {
+    const result = machineKey.probe('linux', io({
+        files: {
+            '/etc/machine-id': '   \n',
+            '/var/lib/dbus/machine-id': 'aa11bb22cc33dd44ee55ff6677889900\n',
+        },
+    }));
+    assert.ok(result, 'must fall through to the dbus path');
+    assert.strictEqual(result.source, 'dbus-machine-id');
+    assert.strictEqual(result.id, 'aa11bb22cc33dd44ee55ff6677889900');
+});
+
+test('R3 linux: an ALL-ZERO machine-id is a failure (would degrade the key input to a constant)', () => {
+    const result = machineKey.probe('linux', io({
+        files: {
+            '/etc/machine-id': '00000000000000000000000000000000\n',
+            '/var/lib/dbus/machine-id': '00000000000000000000000000000000\n',
+        },
+    }));
+    assert.strictEqual(result, null);
+});
+
+test('R3 linux: both paths missing probes as failure', () => {
+    assert.strictEqual(machineKey.probe('linux', io({})), null);
+});
+
+test('R3 win32: MachineGuid is extracted from reg query output', () => {
+    const result = machineKey.probe('win32', io({ exec: { reg: REG_QUERY_REAL } }));
+    assert.ok(result);
+    assert.strictEqual(result.source, 'machine-guid');
+    assert.strictEqual(result.id, '4c4c4544-0046-5710-8034-c4c04f4d3332');
+});
+
+test('R3 win32: unparseable reg output probes as failure', () => {
+    assert.strictEqual(machineKey.probe('win32', io({ exec: { reg: 'ERROR: The system was unable to find' } })), null);
+});
+
+test('R3: an unknown platform probes as failure', () => {
+    assert.strictEqual(machineKey.probe('aix', io({})), null);
+});
+
+test('B12: probes run with hardened exec options (stderr ignored, timeout, windowsHide, maxBuffer)', () => {
+    const stub = io({ exec: { ioreg: IOREG_REAL } });
+    machineKey.probe('darwin', stub);
+    assert.strictEqual(stub.calls.length, 1);
+    const opts = stub.calls[0].opts || {};
+    assert.deepStrictEqual(opts.stdio, ['ignore', 'pipe', 'ignore'],
+        'stderr must never leak into the TUI render area');
+    assert.ok(typeof opts.timeout === 'number' && opts.timeout > 0, 'a hung probe must not hang startup');
+    assert.strictEqual(opts.windowsHide, true);
+    assert.ok(typeof opts.maxBuffer === 'number' && opts.maxBuffer > 0);
+    assert.strictEqual(opts.encoding, 'utf8');
+});
+
+console.log('\n=== machine-key: legacy hostname candidates (R4, B7) ===\n');
+
+test('R4: the raw hostname is the first candidate (no-drift case stays fastest)', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP-3' });
+    assert.strictEqual(list[0], 'FangYideMBP-3');
+});
+
+test('R4: a DHCP search-domain form keeps BOTH the dotted and the stripped name', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP.hsd1.ca.comcast.net' });
+    assert.ok(list.includes('FangYideMBP.hsd1.ca.comcast.net'), 'dotted form must be kept');
+    assert.ok(list.includes('FangYideMBP'), 'everything after the first dot must also be stripped');
+});
+
+test('R4: .local is stripped as well', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP-2.local' });
+    assert.ok(list.includes('FangYideMBP-2'));
+    assert.ok(list.includes('FangYideMBP'));
+});
+
+test('R4: Bonjour neighbours (-N-1 and -N+1) come before the wider sweep', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP-3' });
+    // The forensic case: ciphertext was written under -2 while the runtime name is -3.
+    assert.ok(list.includes('FangYideMBP-2'), 'the immediate predecessor must be a candidate');
+    assert.ok(list.includes('FangYideMBP-4'));
+    assert.ok(list.indexOf('FangYideMBP-2') <= 4,
+        `predecessor must be tried early, got index ${list.indexOf('FangYideMBP-2')}`);
+});
+
+test('R4: the bare base and the -2..-8 sweep are covered', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP-3' });
+    assert.ok(list.includes('FangYideMBP'), 'bare base');
+    for (const n of [2, 3, 4, 5, 6, 7, 8]) {
+        assert.ok(list.includes(`FangYideMBP-${n}`), `missing FangYideMBP-${n}`);
+    }
+});
+
+test('R4: LocalHostName contributes its own base family (different base name entirely)', () => {
+    const list = machineKey.legacyHostnameCandidates({
+        hostname: 'FangYideMBP-3',
+        localHostName: 'FangYideMacBook-Pro-3',
+    });
+    assert.ok(list.includes('FangYideMacBook-Pro-3'));
+    assert.ok(list.includes('FangYideMacBook-Pro-2'));
+});
+
+test('R4: no duplicates, capped at 24, and no whitespace-bearing ComputerName values', () => {
+    const list = machineKey.legacyHostnameCandidates({
+        hostname: 'FangYideMBP-3.lan',
+        localHostName: 'FangYideMacBook-Pro-3',
+    });
+    assert.strictEqual(new Set(list).size, list.length, 'candidates must be deduplicated');
+    assert.ok(list.length <= 24, `candidate list must be capped at 24, got ${list.length}`);
+    for (const c of list) {
+        assert.ok(!/\s/.test(c), `candidate "${c}" contains whitespace — ComputerName was never a gethostname() value`);
+        assert.ok(c.length > 0);
+    }
+});
+
+test('R4: a name with no suffix still produces the -N family', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'runner' });
+    assert.strictEqual(list[0], 'runner');
+    assert.ok(list.includes('runner-2'), 'CI hosts have no suffix but their ciphertext may');
+});
+
+test('R4: defaults come from the real OS when nothing is injected', () => {
+    const list = machineKey.legacyHostnameCandidates();
+    assert.ok(Array.isArray(list) && list.length > 0);
+    assert.strictEqual(list[0], os.hostname());
+});
+
+console.log('\n=== machine-key: reset contract (B10) ===\n');
+
+test('B10: resetForTests clears the pinned identity cache and warnings', () => {
+    const dir = freshSidecarDir('b10');
+    machineKey.getStableIdentity();
+    fs.writeFileSync(path.join(dir, 'machine.json'),
+        JSON.stringify({ v: 1, source: 'ioreg', id: 'after-reset' }));
+    machineKey.resetForTests();
+    assert.strictEqual(machineKey.getWarnings().length, 0, 'warnings must be cleared');
+    assert.strictEqual(machineKey.getStableIdentity().id, 'after-reset',
+        'a stale in-module cache would return the previous id');
+});
+
+console.log(`\n  ${passed} passed, ${failed} failed\n`);
+if (failed > 0) process.exit(1);

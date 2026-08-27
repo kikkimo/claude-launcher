@@ -2,6 +2,8 @@
  * Tests for env UI redesign — Menu navigationKey, draft layer, add flow
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 
 let passed = 0;

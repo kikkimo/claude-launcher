@@ -7,6 +7,8 @@
  * guards against concurrent instances writing at the same time.
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -165,13 +167,37 @@ test('saveConfig takes over a stale lockfile (older than 30s)', () => {
 // via the fallback and upgrade to the current 600000-iteration key on the
 // next save.
 
-function machineId() {
+// Key oracles are written out by hand and must NOT call into lib/machine-key
+// or lib/crypto: reading the pinned id out of the sidecar is an input, but
+// borrowing the derivation would make these assertions tautological.
+//
+// Two different identities on purpose: NEW ciphertext derives from the pinned
+// machine id, while pre-fix ciphertext derives from os.hostname() — which is
+// exactly why it drifts on macOS.
+
+/** Identity used by ciphertext written before this fix. */
+function legacyMachineId() {
     return os.hostname() + os.userInfo().username + os.platform();
 }
 
-/** Hand-derive the key exactly as lib/crypto.js does, at a chosen iteration count. */
+/** Identity used by ciphertext written now: the pinned machine id. */
+function stableMachineId() {
+    const sidecar = process.env.CLAUDE_LAUNCHER_KEY_FILE;
+    if (!fs.existsSync(sidecar)) {
+        // Materialize the sidecar without borrowing the derivation formula.
+        require('../lib/crypto').encrypt('sidecar-warmup');
+    }
+    return JSON.parse(fs.readFileSync(sidecar, 'utf8')).id + os.userInfo().username + os.platform();
+}
+
+/** Hand-derive the pre-fix hostname-era key at a chosen iteration count. */
+function deriveLegacyKey(iterations) {
+    return nodeCrypto.pbkdf2Sync(legacyMachineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+}
+
+/** Hand-derive the current key. */
 function deriveKey(iterations) {
-    return nodeCrypto.pbkdf2Sync(machineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
+    return nodeCrypto.pbkdf2Sync(stableMachineId(), 'claude-launcher-salt', iterations, 32, 'sha256');
 }
 
 /** GCM-encrypt with an externally derived key, in ApiManager's iv:ct:tag hex format. */
@@ -198,7 +224,7 @@ test('legacy 10000-iteration-encrypted apis file loads via fallback and upgrades
 
     // Serialize exactly like ApiManager.saveConfig, then encrypt by hand with
     // the legacy 10000-iteration key — a whole file from before the PBKDF2 bump.
-    const legacyPayload = gcmEncryptWithKey(JSON.stringify(sampleConfig('Legacy Era'), null, 2), deriveKey(10000));
+    const legacyPayload = gcmEncryptWithKey(JSON.stringify(sampleConfig('Legacy Era'), null, 2), deriveLegacyKey(10000));
     fs.writeFileSync(configPath(dir), legacyPayload);
 
     const mgr = new ApiManager(configPath(dir));
