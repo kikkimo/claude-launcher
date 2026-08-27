@@ -1440,18 +1440,28 @@ async function showConfigRecoveryMenu() {
         '',
         colors.bright + colors.orange + '📋 ' + i18n.tSync('menu.api_management.title') + colors.reset,
         '',
-        colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
-        '',
     ]);
 
     if (apiManager.keyMaterialError) {
         // Quarantine is disabled in this state: without a key we cannot tell an
-        // unreadable config from a perfectly good one.
-        screen.render(['', colors.red + '  ' +
-            i18n.tSync('warnings.key_material_degraded', apiManager.keyMaterialError) + colors.reset, '']);
+        // unreadable config from a perfectly good one — and setting a HEALTHY
+        // config aside because its key material broke would be the worse error.
+        screen.render([
+            colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
+                'warnings.config_unreadable_key_material',
+                require('./lib/machine-key').sidecarPath(),
+                apiManager.keyMaterialError) + colors.reset,
+            '',
+        ]);
         await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
         return showMenu();
     }
+
+    screen.render([
+        colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
+        colors.gray + '      ' + apiManager.loadError.message + colors.reset,
+        '',
+    ]);
 
     const options = [
         await i18n.t('menu.api_management.quarantine_config'),
@@ -1991,9 +2001,21 @@ async function showMenu() {
     // silent. Each of these is computed somewhere deep in the load path and was
     // previously thrown away — a diagnosis nobody ever saw.
     const healthLines = [];
-    if (apiManager.loadError) {
+    if (apiManager.loadError && apiManager.keyMaterialError) {
+        // Root cause is the key material, not the config. Saying "the config
+        // file is unreadable" here would point the user at the wrong file — and
+        // the obvious reaction to that message destroys every token, while the
+        // actual fix is removing one file whose contents can be re-derived.
+        healthLines.push(colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
+            'warnings.config_unreadable_key_material',
+            require('./lib/machine-key').sidecarPath(),
+            apiManager.keyMaterialError) + colors.reset);
+    } else if (apiManager.loadError) {
         healthLines.push(colors.bright + colors.red + '  ⚠️  ' +
             i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset);
+        // The reason itself, not just the path: "decryption failed (...)" is
+        // what distinguishes a wrong key from a truncated file.
+        healthLines.push(colors.gray + '      ' + apiManager.loadError.message + colors.reset);
     } else if (apiManager.recoveredFromBackup) {
         healthLines.push(colors.yellow + '  ⚠️  ' +
             i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset);
