@@ -634,17 +634,22 @@ test('BL-5: the tokens survive that save', () => {
 
 test('BL-5: promote-failed is the same hole and must behave the same', () => {
     const ws = seedDriftedWorkspace('bl5promote');
-    const healthy = fs.readFileSync(ws.configFile, 'utf8');
+    // The generation that will actually load is .bak — main is about to become
+    // unreadable — so that is the one whose bytes must be preserved.
+    const loadedGeneration = fs.readFileSync(ws.configFile + '.bak', 'utf8');
     fs.rmSync(ws.configFile);
     fs.mkdirSync(ws.configFile);
     fs.writeFileSync(path.join(ws.configFile, 'blocker'), 'x');
 
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
     assert.strictEqual(mgr.keyHealOutcome, 'skipped:promote-failed', 'precondition');
-    // main is a directory, so an ordinary save cannot land anyway; what matters
-    // is that the skip does not leave the migration invariant unguarded.
-    assert.strictEqual(mgr._keyMigrationBlocked, true,
-        'a skip that bypassed the snapshot must block the ordinary save path too');
+    // The invariant is satisfied by HAVING the pre-state copy, not by blocking:
+    // an ordinary save may still migrate here, and now it does so with the
+    // generation it replaces already preserved. Asserting the latch instead
+    // would pin an implementation detail that the better fix removes.
+    const preserved = snapshotsFor(ws.configFile).map(snapshotCiphertext);
+    assert.ok(preserved.includes(loadedGeneration),
+        'the generation that actually loaded must be preserved before any save can migrate it');
 });
 
 console.log('\n=== MJ-9: a flapping fingerprint must not eat a backup generation per launch ===\n');
