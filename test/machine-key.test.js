@@ -196,6 +196,95 @@ test('B5: an existing sidecar written by a concurrent winner is adopted, not clo
     assert.strictEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')).id, 'winner-id-from-other-process');
 });
 
+test('S-4: a sidecar with an unknown version fails closed', () => {
+    const dir = freshSidecarDir('s4');
+    fs.writeFileSync(path.join(dir, 'machine.json'),
+        JSON.stringify({ v: 9, source: 'ioreg', id: 'from-the-future' }));
+    assert.throws(() => machineKey.getStableIdentity(), (e) => e.name === 'KeyMaterialError',
+        'an unrecognised layout must not be trusted — we cannot know what its id means');
+});
+
+test('S-4: a sidecar with an unknown source fails closed', () => {
+    const dir = freshSidecarDir('s4b');
+    // `random` is exactly the mode this design forbids: an identity that cannot
+    // be re-derived and is not covered by the candidate set. Accepting one
+    // written by some other tool would break the recoverability invariant on
+    // the READ side, where it matters most.
+    fs.writeFileSync(path.join(dir, 'machine.json'),
+        JSON.stringify({ v: 1, source: 'random', id: 'a9f3c1' }));
+    assert.throws(() => machineKey.getStableIdentity(), (e) => e.name === 'KeyMaterialError');
+});
+
+test('S-4: every source this module can write is accepted on read', () => {
+    for (const source of machineKey.KNOWN_SOURCES) {
+        const dir = freshSidecarDir('s4c');
+        fs.writeFileSync(path.join(dir, 'machine.json'),
+            JSON.stringify({ v: 1, source, id: 'round-trip-' + source }));
+        assert.strictEqual(machineKey.getStableIdentity().source, source);
+    }
+});
+
+console.log('\n=== machine-key: pin decision (S-6) ===\n');
+
+test('S-6: a successful probe pins the probed identity', () => {
+    const decision = machineKey.pinDecision({ source: 'ioreg', id: 'UUID-1' }, 'anyhost');
+    assert.strictEqual(decision.identity.source, 'ioreg');
+    assert.strictEqual(decision.identity.id, 'UUID-1');
+    assert.strictEqual(decision.pin, true);
+});
+
+test('S-6: a definite probe failure pins the hostname identity', () => {
+    // Nothing to retry: this platform has no stable id to offer. Pinning still
+    // helps — it stops the hostname from drifting from here on.
+    const decision = machineKey.pinDecision(null, 'somehost-3');
+    assert.strictEqual(decision.identity.source, 'hostname');
+    assert.strictEqual(decision.identity.id, 'somehost-3');
+    assert.strictEqual(decision.pin, true);
+    assert.ok(decision.warning, 'the degraded identity must be reported');
+});
+
+test('S-6: a TIMED-OUT probe uses the hostname identity but does NOT pin it', () => {
+    // A cold or loaded machine can blow the probe timeout once. Pinning then
+    // would freeze the weaker identity forever, so the pin is deferred and the
+    // next launch probes again. Data written meanwhile is still recoverable —
+    // the hostname family is exactly what the candidate set covers.
+    const decision = machineKey.pinDecision({ timedOut: true }, 'somehost-3');
+    assert.strictEqual(decision.identity.source, 'hostname');
+    assert.strictEqual(decision.identity.id, 'somehost-3');
+    assert.strictEqual(decision.pin, false, 'a transient timeout must not become permanent');
+    assert.ok(decision.warning);
+});
+
+test('S-6: probe reports a timeout distinguishably from a definite failure', () => {
+    const timeout = Object.assign(new Error('spawnSync ioreg ETIMEDOUT'),
+        { code: 'ETIMEDOUT', killed: true, signal: 'SIGTERM' });
+    const result = machineKey.probe('darwin', io({ exec: { ioreg: timeout } }));
+    assert.ok(result && result.timedOut === true,
+        `a timeout must be reported as such, got ${JSON.stringify(result)}`);
+    // And a plain missing binary must stay a definite failure.
+    assert.strictEqual(machineKey.probe('darwin', io({})), null);
+});
+
+console.log('\n=== machine-key: probing stays lazy (S-5) ===\n');
+
+test('S-5: inspecting key material health does not probe or create a sidecar', () => {
+    freshSidecarDir('s5');
+    const health = machineKey.inspectPinned();
+    assert.strictEqual(health.ok, true, 'no sidecar is not an error');
+    assert.strictEqual(health.identity, null);
+    assert.strictEqual(fs.existsSync(process.env.CLAUDE_LAUNCHER_KEY_FILE), false,
+        'merely asking about health must not fork a probe or pin an identity — ' +
+        'the launcher constructs an ApiManager at module load, before the user does anything');
+});
+
+test('S-5: inspecting still fails closed on a corrupt sidecar', () => {
+    const dir = freshSidecarDir('s5b');
+    fs.writeFileSync(path.join(dir, 'machine.json'), 'not json at all');
+    const health = machineKey.inspectPinned();
+    assert.strictEqual(health.ok, false);
+    assert.ok(/key material/i.test(health.error));
+});
+
 console.log('\n=== machine-key: platform probing (R3, B12) ===\n');
 
 test('R3 darwin: IOPlatformUUID is extracted from real ioreg output', () => {

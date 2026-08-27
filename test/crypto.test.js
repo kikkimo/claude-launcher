@@ -525,6 +525,26 @@ test('B2: the padding-collision guard still holds with a recovered key registere
     resetKeyCachesForTests();
 });
 
+test('S-9a: a miss never disables later recoveries (no per-process sweep short-circuit)', () => {
+    // Guards against reintroducing a "sweep already failed" flag. That flag
+    // would express a per-PAYLOAD result as a per-PROCESS conclusion, so the
+    // first unrecoverable token would condemn every recoverable one after it —
+    // including the .bak generation the loader tries next.
+    withHostname('fixedhost-3', () => {
+        const unreachable1 = gcmWithKey('lost-one', nodeCrypto.randomBytes(32));
+        const unreachable2 = gcmWithKey('lost-two', nodeCrypto.randomBytes(32));
+        const reachable = gcmWithKey('found-me', deriveLegacyKey(600000, 'fixedhost-2'));
+
+        assert.strictEqual(decryptWithRecovery(unreachable1).success, false);
+        assert.strictEqual(decryptWithRecovery(unreachable2).success, false);
+
+        const result = decryptWithRecovery(reachable);
+        assert.ok(result.success,
+            'a reachable key must still be found after two consecutive misses');
+        assert.strictEqual(result.value, 'found-me');
+    });
+});
+
 console.log('\n--- B10: the reset contract clears every key cache ---\n');
 
 test('B10: resetKeyCachesForTests clears registered recovered keys too', () => {

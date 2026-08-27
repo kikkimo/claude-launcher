@@ -31,8 +31,11 @@ const crypto = require('crypto');
 const REAL_HOME = os.homedir();
 const REAL_SIDECAR = path.join(REAL_HOME, '.claude-launcher-machine.json');
 const REAL_CONFIG = path.join(REAL_HOME, '.claude-launcher-apis.json');
+// The sidecar is fingerprinted alongside the config generations: checking only
+// for its CREATION would miss a run that rewrote an existing one, which is the
+// more damaging case — it changes the key that opens the user's real tokens.
 const REAL_GENERATIONS = [REAL_CONFIG, REAL_CONFIG + '.bak', REAL_CONFIG + '.bak2',
-    REAL_CONFIG + '.pre-key-migration'];
+    REAL_CONFIG + '.pre-key-migration', REAL_SIDECAR];
 
 /** sha256 of a file's bytes, or null when absent/unreadable. */
 function fingerprint(filePath) {
