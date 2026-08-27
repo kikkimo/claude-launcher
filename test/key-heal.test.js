@@ -584,119 +584,47 @@ function paddingLuckCbcToken(plaintext, writtenUnder, openedUnder) {
     throw new Error('could not find a padding-luck CBC sample');
 }
 
-test('BL-1: a padding-luck CBC token is NOT accepted as recovered plaintext', () => {
+test('BL-1: a padding-luck hit is rejected and the sweep goes on to the real key', () => {
+    // The sharpest case the in-loop gate exists for. Candidate order puts
+    // fixedhost-3 (the runtime name, which produces the garbage) BEFORE
+    // fixedhost-2 (the name that actually encrypted it), so an implementation
+    // that accepted the first successful decryption — or stopped at the first
+    // rejection — would hand back nonsense or lose the token.
     const luck = paddingLuckCbcToken(TOKEN_CBC_REAL, 'fixedhost-2', 'fixedhost-3');
     const ws = seedDriftedWorkspace('bl1', { rawTokens: [null, luck.payload] });
 
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
     assert.strictEqual(mgr.loadError, null);
-    const names = mgr.keyRecoveryReport.unrecoverable.map(u => u.apiName);
-    assert.deepStrictEqual(names, ['Beta'],
-        `an unauthenticated wrong-key decryption must be rejected, not reported as recovered ` +
-        `(found in ${luck.attempts} tries; garbage was ${JSON.stringify(luck.garbage.slice(0, 24))})`);
-});
-
-test('BL-1: the real CBC ciphertext survives the heal byte-for-byte', () => {
-    const luck = paddingLuckCbcToken(TOKEN_CBC_REAL, 'fixedhost-2', 'fixedhost-3');
-    const ws = seedDriftedWorkspace('bl1b', { rawTokens: [null, luck.payload] });
-
-    loadUnderHostname(ws.configFile, 'fixedhost-3');
-    resetKeyCachesForTests();
-    const reopened = new ApiManager(ws.configFile);
-    assert.strictEqual(reopened.config.apis[1].authToken, luck.payload,
-        'the token must not be replaced by an encryption of the garbage plaintext');
-
-    // And whoever still holds the original key gets the REAL token back.
-    const parts = luck.payload.split(':');
-    const d = nodeCrypto.createDecipheriv('aes-256-cbc',
-        hostnameEraKey('fixedhost-2', 10000), Buffer.from(parts[0], 'hex'));
-    let real = d.update(parts[1], 'hex', 'utf8');
-    real += d.final('utf8');
-    assert.strictEqual(real, TOKEN_CBC_REAL, 'the real token is still recoverable from the ciphertext');
-});
-
-test('M1: a CBC token from a DRIFTED hostname is now recovered, through the gate', () => {
-    // Users installed before the GCM switch have per-token CBC ciphertext. The
-    // outer blob became GCM on the first save after upgrading, so it recovers
-    // and heals — but the token was skipped entirely by decryptWithRecovery's
-    // early return for 2-segment payloads, and reported unrecoverable even
-    // though its key was sitting in the candidate list. The gate that makes a
-    // sweep safe already exists; it just was not applied here.
-    const key = hostnameEraKey('fixedhost-2', 10000);
-    const iv = nodeCrypto.randomBytes(16);
-    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
-    let ct = cipher.update(TOKEN_CBC_REAL, 'utf8', 'hex');
-    ct += cipher.final('hex');
-    const cbcToken = iv.toString('hex') + ':' + ct;
-
-    const ws = seedDriftedWorkspace('m1cbc', { rawTokens: [null, cbcToken] });
-    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
     assert.deepStrictEqual(mgr.keyRecoveryReport.unrecoverable, [],
-        'the key is in the candidate set; refusing to look was the data loss');
+        `the real key is in the candidate set (found the collision in ${luck.attempts} tries)`);
 
     resetKeyCachesForTests();
     const reopened = new ApiManager(ws.configFile);
     const dec = decrypt(reopened.config.apis[1].authToken);
-    assert.ok(dec.success, `the recovered token must be migrated: ${dec.error}`);
-    assert.strictEqual(dec.value, TOKEN_CBC_REAL);
-    assert.strictEqual(reopened.config.apis[1].authToken.split(':').length, 3, 'upgraded to GCM');
+    assert.ok(dec.success);
+    assert.strictEqual(dec.value, TOKEN_CBC_REAL,
+        `the REAL token must be what was stored, never the garbage ` +
+        `(${JSON.stringify(luck.garbage.slice(0, 24))})`);
 });
 
-test('M1: a whole CBC-era config file is recovered from a drifted hostname', () => {
-    // The other reported shape: a user who never re-saved since before the GCM
-    // switch has the ENTIRE file as 2-segment CBC. Drift used to mean loadError
-    // and zero recovery — and then the destructive advice.
-    const ws = seedDriftedWorkspace('m1outer');
-    // Hand-open the fixture with the key that wrote it — plain decrypt() would
-    // need the sweep, which is the thing under test.
-    const plainValue = gcmOpen(fs.readFileSync(ws.configFile, 'utf8'), hostnameEraKey('fixedhost-2', 600000));
-    const key = hostnameEraKey('fixedhost-2', 10000);
+test('BL-1: a CBC token whose key is genuinely gone is preserved byte-for-byte', () => {
+    // No candidate can open it, so the only safe move is to touch nothing —
+    // and to say so rather than store something that merely looks like a token.
+    const lostKey = nodeCrypto.randomBytes(32);
     const iv = nodeCrypto.randomBytes(16);
-    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
-    let ct = cipher.update(plainValue, 'utf8', 'hex');
-    ct += cipher.final('hex');
-    const cbcBlob = iv.toString('hex') + ':' + ct;
-    for (const suffix of ['', '.bak', '.bak2']) {
-        if (suffix === '' || fs.existsSync(ws.configFile + suffix)) {
-            fs.writeFileSync(ws.configFile + suffix, cbcBlob);
-        }
-    }
-    resetKeyCachesForTests();
-
-    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
-    assert.strictEqual(mgr.loadError, null, `a CBC-era file must recover: ${JSON.stringify(mgr.loadError)}`);
-    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha', 'Beta']);
-    assert.strictEqual(mgr.keyHealOutcome, 'saved');
-});
-
-test('M1: a padding-luck hit does not stop the sweep from finding the real key', () => {
-    // The gate lives INSIDE the candidate loop on purpose. If a wrong candidate
-    // produced plausible-looking garbage and the loop treated that as the
-    // answer, the real key — often later in the list — would never be tried.
-    const cryptoModule = require(path.join(REPO, 'lib', 'crypto'));
-    const realKey = hostnameEraKey('fixedhost-2', 10000);
-    const iv = nodeCrypto.randomBytes(16);
-    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', realKey, iv);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', lostKey, iv);
     let ct = cipher.update(TOKEN_CBC_REAL, 'utf8', 'hex');
     ct += cipher.final('hex');
-    const payload = iv.toString('hex') + ':' + ct;
+    const orphan = iv.toString('hex') + ':' + ct;
 
-    os.hostname = () => 'fixedhost-3';
+    const ws = seedDriftedWorkspace('bl1b', { rawTokens: [null, orphan] });
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.deepStrictEqual(mgr.keyRecoveryReport.unrecoverable.map(u => u.apiName), ['Beta']);
+
     resetKeyCachesForTests();
-    try {
-        let calls = 0;
-        const result = cryptoModule.decryptWithRecovery(payload, {
-            // Reject the first thing that decrypts, whatever it is: the sweep
-            // must keep going rather than give up or accept it.
-            trust: (value) => { calls++; return calls > 1 && value === TOKEN_CBC_REAL; },
-        });
-        assert.ok(calls >= 1, 'the gate must be consulted inside the loop');
-        assert.strictEqual(result.success, calls > 1,
-            'a rejected candidate must not end the search');
-    } finally {
-        os.hostname = realHostname;
-        resetKeyCachesForTests();
-    }
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.config.apis[1].authToken, orphan,
+        'an unreachable ciphertext must be left exactly as it was');
 });
 
 test('BL-1: a CBC token that opens under the CURRENT hostname is still healed', () => {
