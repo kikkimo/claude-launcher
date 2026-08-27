@@ -334,6 +334,43 @@ test('R4: no duplicates, capped at 24, and no whitespace-bearing ComputerName va
     }
 });
 
+test('BL-2: the NEIGHBOURS of a dotted name keep the domain form too', () => {
+    // "HostName not set" is exactly when gethostname() returns a name carrying
+    // .local or a DHCP search domain. Ciphertext written under `Foo-2.local`
+    // while the runtime name is `Foo-3.local` is the most common shape of this
+    // bug on macOS — keeping only the un-domained derivations makes it
+    // permanently unrecoverable.
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'Foo-3.local', localHostName: null });
+    assert.ok(list.includes('Foo-2'), 'un-domained predecessor');
+    assert.ok(list.includes('Foo-2.local'), 'DOMAINED predecessor is the one that actually wrote the file');
+    assert.ok(list.includes('Foo-4.local'));
+    assert.ok(list.includes('Foo.local'), 'the bare base in domain form');
+    assert.ok(list.includes('Foo-5.local'), 'the wider sweep in domain form');
+});
+
+test('BL-2: the same holds for a DHCP search domain, not just .local', () => {
+    const list = machineKey.legacyHostnameCandidates({
+        hostname: 'bar-3.hsd1.ca.comcast.net', localHostName: null,
+    });
+    assert.ok(list.includes('bar-2.hsd1.ca.comcast.net'),
+        'the multi-label search domain must be preserved on derived candidates');
+    assert.ok(list.includes('bar-2'));
+});
+
+test('BL-2: a name with no domain gains no domain variants (no wasted slots)', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'FangYideMBP-3', localHostName: null });
+    for (const candidate of list) {
+        assert.ok(!candidate.includes('.'), `unexpected dotted candidate: ${candidate}`);
+    }
+    assert.ok(list.includes('FangYideMBP-2'));
+});
+
+test('BL-2: the domained predecessor is still tried early', () => {
+    const list = machineKey.legacyHostnameCandidates({ hostname: 'Foo-3.local', localHostName: null });
+    assert.ok(list.indexOf('Foo-2.local') <= 5,
+        `the most likely candidate must stay near the front, got index ${list.indexOf('Foo-2.local')}`);
+});
+
 test('R4: a name with no suffix still produces the -N family', () => {
     const list = machineKey.legacyHostnameCandidates({ hostname: 'runner' });
     assert.strictEqual(list[0], 'runner');
