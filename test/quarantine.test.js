@@ -254,6 +254,98 @@ test('R11: quarantine refuses when there is nothing wrong to quarantine', () => 
     assert.deepStrictEqual(snapshotDir(dir), before, 'a healthy config must never be moved');
 });
 
+console.log('\n=== BL-4: a global failure must never be treated as a broken file ===\n');
+
+/**
+ * The shape this bug needs: main and .bak on the CURRENT key (i.e. the config
+ * has already been healed and used), .bak2 still on an old hostname key. Break
+ * the key material and main/.bak become unreadable while .bak2 — which the
+ * candidate sweep does not need the sidecar for — still opens.
+ */
+function seedHealedWithOldBak2(label) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cl-bl4-${label}-`));
+    const configFile = path.join(dir, 'apis.json');
+    const sidecar = path.join(dir, 'machine.json');
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = sidecar;
+    resetKeyCachesForTests();
+
+    const mgr = new ApiManager(configFile);
+    mgr.addApi('https://a.example.com', 'sk-bl4-alpha-000001', 'claude-sonnet-4', 'Alpha');
+
+    // .bak2 = the pre-heal generation, on a reachable old hostname key.
+    const oldKey = hostnameEraKey('homehost-2', 600000);
+    const old = JSON.parse(decrypt(fs.readFileSync(configFile, 'utf8')).value);
+    old.apis[0].name = 'BeforeTheHeal';
+    fs.writeFileSync(configFile + '.bak2', gcmWithKey(JSON.stringify(old, null, 2), oldKey));
+
+    // A real user edit after the heal, which also rotates main into .bak.
+    mgr.updateApiField(mgr.getApis()[0].id, 'name', 'RenamedAfterHeal');
+    const mainBytes = fs.readFileSync(configFile, 'utf8');
+    resetKeyCachesForTests();
+    return { dir, configFile, sidecar, mainBytes };
+}
+
+test('BL-4: broken key material must not promote a backup over the newest generation', () => {
+    const ws = seedHealedWithOldBak2('promote');
+    fs.writeFileSync(ws.sidecar, JSON.stringify({ v: 9, source: 'ioreg', id: 'from-the-future' }));
+
+    const mgr = loadUnder(ws.configFile, 'homehost-3');
+    assert.ok(mgr.keyMaterialError, 'precondition: the failure is global, not per-file');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), ws.mainBytes,
+        'the newest generation must still be there — no backup can be better than main ' +
+        'when the reason nothing decrypts is the key material');
+    assert.strictEqual(mgr.recoveredFromBackup, false,
+        'and the user must not be told everything was recovered');
+    assert.ok(mgr.loadError, 'the problem must be surfaced, not papered over');
+});
+
+test('BL-4: the user edit made after the heal survives a broken-then-fixed sidecar', () => {
+    // The user-visible consequence, pinned directly: break the key material,
+    // start once (which is where the silent rollback used to happen), fix it,
+    // and the config must be exactly what it was.
+    const ws = seedHealedWithOldBak2('survives');
+    const goodSidecar = fs.readFileSync(ws.sidecar, 'utf8');
+    fs.writeFileSync(ws.sidecar, JSON.stringify({ v: 9, source: 'ioreg', id: 'from-the-future' }));
+    loadUnder(ws.configFile, 'homehost-3');
+
+    fs.writeFileSync(ws.sidecar, goodSidecar);
+    resetKeyCachesForTests();
+    const recovered = new ApiManager(ws.configFile);
+    assert.strictEqual(recovered.loadError, null, 'fixing the key material must restore access');
+    assert.deepStrictEqual(recovered.config.apis.map(a => a.name), ['RenamedAfterHeal'],
+        'the edit made after the heal must still be there — a silent rollback to the ' +
+        'pre-heal generation loses every change since');
+});
+
+test('BL-4: a genuinely corrupt main is still repaired from backup', () => {
+    // The legitimate case must keep working — this is the behaviour the global
+    // check must not break.
+    const ws = seedHealedWithOldBak2('legit');
+    fs.writeFileSync(ws.configFile, 'deadbeef:cafebabe:0011');
+
+    const mgr = loadUnder(ws.configFile, 'homehost-3');
+    assert.strictEqual(mgr.loadError, null, 'a per-file problem is still recoverable');
+    assert.strictEqual(mgr.recoveredFromBackup, true);
+    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha'],
+        'and it must recover the NEWEST usable generation (.bak), not the oldest');
+});
+
+test('BL-4: promoting a backup preserves the generation it replaces', () => {
+    // Even a legitimate promotion overwrites main, and those bytes may be the
+    // only copy some future key can still open.
+    const ws = seedHealedWithOldBak2('preserve');
+    const corrupt = 'deadbeef:cafebabe:0011';
+    fs.writeFileSync(ws.configFile, corrupt);
+
+    const mgr = loadUnder(ws.configFile, 'homehost-3');
+    assert.strictEqual(mgr.recoveredFromBackup, true);
+    const preserved = mgr.supersededGeneration;
+    assert.ok(preserved, 'the replaced generation must be reported so the user can find it');
+    assert.ok(fs.existsSync(preserved), `${preserved} must exist`);
+    assert.strictEqual(fs.readFileSync(preserved, 'utf8'), corrupt,
+        'byte-for-byte — renameSync over main would simply have destroyed it');
+});
+
 console.log('\n=== R12: quarantine is genuinely reversible ===\n');
 
 test('R12: a quarantined config is restored once its key becomes reachable again', () => {
