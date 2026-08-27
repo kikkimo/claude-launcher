@@ -328,6 +328,82 @@ test('R10: heal is skipped entirely when key material is in the fail-closed stat
     }
 });
 
+console.log('\n=== MJ-3: the OUTER staleness signal must stand on its own ===\n');
+
+/**
+ * A config whose BLOB is on an old key generation while its tokens are not a
+ * signal at all — either because there are none, or because they are already on
+ * the current key. Without these, `inner.pending.length > 0` alone carries every
+ * heal and the outer signal is never exercised.
+ */
+function seedOuterOnlyDrift(label, apis) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cl-outer-${label}-`));
+    const configFile = path.join(dir, 'apis.json');
+    const sidecar = path.join(dir, 'machine.json');
+    process.env.CLAUDE_LAUNCHER_KEY_FILE = sidecar;
+    resetKeyCachesForTests();
+
+    const seeder = new ApiManager(configFile);
+    for (const api of apis) {
+        seeder.addApi(api.url, api.token, 'claude-sonnet-4', api.name);
+    }
+    // With no APIs nothing has been persisted yet — force the file into being.
+    if (apis.length === 0) assert.strictEqual(seeder.saveConfig(), true);
+    // Tokens stay exactly as the current key wrote them; only the blob moves to
+    // a drifted hostname key.
+    const config = JSON.parse(decrypt(fs.readFileSync(configFile, 'utf8')).value);
+    const drifted = gcmWithKey(JSON.stringify(config, null, 2), hostnameEraKey('fixedhost-2', 600000));
+    for (const p of [configFile, configFile + '.bak', configFile + '.bak2']) {
+        if (p === configFile || fs.existsSync(p)) fs.writeFileSync(p, drifted);
+    }
+    resetKeyCachesForTests();
+    return { dir, configFile, sidecar, drifted };
+}
+
+test('MJ-3: a drifted blob with ZERO apis is still migrated', () => {
+    const ws = seedOuterOnlyDrift('empty', []);
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.loadError, null);
+    assert.strictEqual(mgr.keyStale, true, 'the outer signal alone must raise keyStale');
+    assert.strictEqual(mgr.keyRecoveryReport.outerKeyStale, true);
+    assert.strictEqual(mgr.keyRecoveryReport.recoveredFields, 0,
+        'precondition: no inner field can be carrying this');
+    assert.strictEqual(mgr.keyHealOutcome, 'saved');
+    assert.ok(decryptWithCurrentKey(fs.readFileSync(ws.configFile, 'utf8')).success,
+        'the file must be re-encrypted under the current key');
+});
+
+test('MJ-3: a drifted blob whose tokens are already current is still migrated', () => {
+    const ws = seedOuterOnlyDrift('tokens-current', [
+        { url: 'https://a.example.com', token: 'sk-current-token-0001', name: 'Alpha' },
+    ]);
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyRecoveryReport.recoveredFields, 0,
+        'precondition: the token is already on the current key');
+    assert.strictEqual(mgr.keyStale, true, 'the blob alone must be enough');
+    assert.ok(decryptWithCurrentKey(fs.readFileSync(ws.configFile, 'utf8')).success);
+    // And the untouched token must still open afterwards.
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    const dec = decrypt(reopened.config.apis[0].authToken);
+    assert.ok(dec.success && dec.value === 'sk-current-token-0001');
+});
+
+test('MJ-3: a config already on the current key is NOT rewritten', () => {
+    // The negative half of the signal: without this, "always heal" would pass.
+    const ws = seedOuterOnlyDrift('fresh', [
+        { url: 'https://a.example.com', token: 'sk-current-token-0002', name: 'Alpha' },
+    ]);
+    loadUnderHostname(ws.configFile, 'fixedhost-3'); // migrate once
+    const afterHeal = fs.readFileSync(ws.configFile, 'utf8');
+
+    resetKeyCachesForTests();
+    const again = new ApiManager(ws.configFile);
+    assert.strictEqual(again.keyStale, false);
+    assert.strictEqual(again.keyHealOutcome, 'idle');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), afterHeal);
+});
+
 console.log('\n=== BL-1: CBC garbage must never be re-encrypted over a real token ===\n');
 
 /**
