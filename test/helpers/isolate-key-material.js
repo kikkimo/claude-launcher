@@ -39,8 +39,37 @@ const REAL_CONFIG = path.join(REAL_HOME, '.claude-launcher-apis.json');
 // HOME through version-checker's loadConfigSync(), and the guard could not see
 // it because it was not on this list.
 const REAL_LAUNCHER_CONFIG = path.join(REAL_HOME, '.claude-launcher-config.json');
-const REAL_GENERATIONS = [REAL_CONFIG, REAL_CONFIG + '.bak', REAL_CONFIG + '.bak2',
-    REAL_CONFIG + '.pre-key-migration', REAL_SIDECAR, REAL_LAUNCHER_CONFIG];
+const REAL_FIXED = [REAL_CONFIG, REAL_CONFIG + '.bak', REAL_CONFIG + '.bak2',
+    REAL_SIDECAR, REAL_LAUNCHER_CONFIG];
+
+/**
+ * Everything this release can create beside the config, matched by prefix
+ * rather than by name: snapshots are content-addressed, quarantines are
+ * numbered, and a fixed list silently stopped covering them. The one that
+ * matters most is a snapshot slot — a permanent copy of the developer's own
+ * tokens landing in their real home.
+ */
+function realVariants() {
+    const base = path.basename(REAL_CONFIG);
+    const found = [];
+    try {
+        for (const name of fs.readdirSync(REAL_HOME)) {
+            if (!name.startsWith(base)) continue;
+            if (/\.pre-key-migration|\.unreadable\.|\.probe-attempts$|\.key-scan-misses$|\.lock$|\.tmp$/.test(name)) {
+                found.push(path.join(REAL_HOME, name));
+            }
+        }
+    } catch (_) { /* unreadable home: nothing to compare */ }
+    try {
+        const sidecarBase = path.basename(REAL_SIDECAR);
+        for (const name of fs.readdirSync(REAL_HOME)) {
+            if (name.startsWith(sidecarBase) && name !== sidecarBase) found.push(path.join(REAL_HOME, name));
+        }
+    } catch (_) { /* ignore */ }
+    return found;
+}
+
+const REAL_GENERATIONS = REAL_FIXED;
 
 /** sha256 of a file's bytes, or null when absent/unreadable. */
 function fingerprint(filePath) {
@@ -53,6 +82,7 @@ function fingerprint(filePath) {
 
 const sidecarExistedAtStart = fs.existsSync(REAL_SIDECAR);
 const generationsAtStart = REAL_GENERATIONS.map(fingerprint);
+const variantsAtStart = new Map(realVariants().map(p => [p, fingerprint(p)]));
 
 /**
  * Point every piece of per-machine state at a fresh temp directory.
@@ -88,6 +118,10 @@ function checkRealFiles() {
             problems.push(`modified ${filePath}`);
         }
     });
+    for (const filePath of realVariants()) {
+        if (!variantsAtStart.has(filePath)) problems.push(`created ${filePath}`);
+        else if (variantsAtStart.get(filePath) !== fingerprint(filePath)) problems.push(`modified ${filePath}`);
+    }
     if (problems.length > 0) {
         console.error(`\n  ✗ FATAL: this test run touched real credential files:\n    - ${problems.join('\n    - ')}`);
         process.exitCode = 1;

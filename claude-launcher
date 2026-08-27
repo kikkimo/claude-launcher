@@ -2053,11 +2053,15 @@ async function showMenu() {
     // Degraded key material: the identity fell back to the hostname, or could
     // not be pinned at all. Not fatal, but it silently weakens the guarantee.
     if (!apiManager.keyMaterialWarned) {
-        for (const warning of require('./lib/machine-key').getWarnings()) {
+        const warnings = require('./lib/machine-key').getWarnings();
+        for (const warning of warnings) {
             healthLines.push(colors.yellow + '  ⚠️  ' +
                 i18n.tSync('warnings.key_material_degraded', warning) + colors.reset);
         }
-        apiManager.keyMaterialWarned = true;
+        // Latch only once something was actually shown. Probing is lazy, so on
+        // a first run the list is still empty at this point and the warning the
+        // first encrypt() then produces would never be rendered at all.
+        if (warnings.length > 0) apiManager.keyMaterialWarned = true;
     }
 
     // A snapshot that outlived every generation holds the only remaining copy

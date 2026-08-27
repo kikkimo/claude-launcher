@@ -1283,6 +1283,13 @@ test('M-2(b): the snapshot carries a header, and the machine id is NOT in it', (
     assert.ok(/^[0-9a-f]{12}$/.test(doc.idHint), 'a verifiable hint, not the id itself');
     assert.ok(typeof doc.savedAt === 'string' && doc.savedAt.includes('T'), 'when it was taken');
     assert.strictEqual(doc.ciphertext, ws.drifted);
+    // The hint must describe the identity that can OPEN these bytes — the OLD
+    // one. Naming the migration target was off by one generation and pointed a
+    // human doing manual recovery at the only identity that cannot open it.
+    const openerIdentity = 'fixedhost-2' + os.userInfo().username + os.platform();
+    assert.strictEqual(doc.idHint,
+        nodeCrypto.createHash('sha256').update(openerIdentity).digest('hex').slice(0, 12),
+        'the hint must identify the key generation this slot belongs to');
 
     // The value that must NOT be recoverable from this file: the snapshot sits
     // next to the config, so anything here leaks with the config. The id is the
@@ -1291,9 +1298,8 @@ test('M-2(b): the snapshot carries a header, and the machine id is NOT in it', (
     const identity = JSON.parse(fs.readFileSync(ws.sidecar, 'utf8'));
     assert.ok(!JSON.stringify(doc).includes(identity.id),
         'the machine id must not appear in a file that travels with the config');
-    assert.strictEqual(doc.idHint,
-        nodeCrypto.createHash('sha256').update(identity.id).digest('hex').slice(0, 12),
-        'the hint must let a human VERIFY a re-probed identity without revealing it');
+    assert.ok(!JSON.stringify(doc).includes('fixedhost-2'),
+        'and neither may the hostname that wrote it — it is the key input for these bytes');
 });
 
 test('M-2(b): an orphaned snapshot is reported instead of looking like first-time usage', () => {
