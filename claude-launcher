@@ -2042,7 +2042,11 @@ async function showMenu() {
         healthLines.push(colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
             'warnings.token_unrecoverable',
             unrecoverable.map(entry => entry.apiName).join(', '),
-            apiManager.configFile + '.pre-key-migration') + colors.reset);
+            // The real paths on disk. Snapshots are content-addressed, so a
+            // constructed name points at a file that does not exist — and a
+            // recovery instruction naming a missing file is worse than none.
+            apiManager.listSnapshots().map(entry => entry.path).join(', ') ||
+                apiManager.configFile + '*') + colors.reset);
         apiManager.keyRecoveryWarned = true; // once per run
     }
 
