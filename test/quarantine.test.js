@@ -296,7 +296,15 @@ test('BL-4: broken key material must not promote a backup over the newest genera
         'when the reason nothing decrypts is the key material');
     assert.strictEqual(mgr.recoveredFromBackup, false,
         'and the user must not be told everything was recovered');
-    assert.ok(mgr.loadError, 'the problem must be surfaced, not papered over');
+    assert.ok(mgr.keyMaterialError, 'the problem must be surfaced, not papered over');
+    // Since M-2(a) put the probe result in the candidate sweep, a config on the
+    // machine identity is recovered even with a broken sidecar — so assert what
+    // actually matters here: whatever loads must be the NEWEST generation, never
+    // the pre-heal one the loader used to promote over it.
+    if (!mgr.loadError) {
+        assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['RenamedAfterHeal'],
+            'a rollback to the pre-heal generation is the defect');
+    }
 });
 
 test('BL-4: the user edit made after the heal survives a broken-then-fixed sidecar', () => {

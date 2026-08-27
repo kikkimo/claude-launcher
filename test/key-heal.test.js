@@ -615,6 +615,90 @@ test('BL-1: the real CBC ciphertext survives the heal byte-for-byte', () => {
     assert.strictEqual(real, TOKEN_CBC_REAL, 'the real token is still recoverable from the ciphertext');
 });
 
+test('M1: a CBC token from a DRIFTED hostname is now recovered, through the gate', () => {
+    // Users installed before the GCM switch have per-token CBC ciphertext. The
+    // outer blob became GCM on the first save after upgrading, so it recovers
+    // and heals — but the token was skipped entirely by decryptWithRecovery's
+    // early return for 2-segment payloads, and reported unrecoverable even
+    // though its key was sitting in the candidate list. The gate that makes a
+    // sweep safe already exists; it just was not applied here.
+    const key = hostnameEraKey('fixedhost-2', 10000);
+    const iv = nodeCrypto.randomBytes(16);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
+    let ct = cipher.update(TOKEN_CBC_REAL, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    const cbcToken = iv.toString('hex') + ':' + ct;
+
+    const ws = seedDriftedWorkspace('m1cbc', { rawTokens: [null, cbcToken] });
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.deepStrictEqual(mgr.keyRecoveryReport.unrecoverable, [],
+        'the key is in the candidate set; refusing to look was the data loss');
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    const dec = decrypt(reopened.config.apis[1].authToken);
+    assert.ok(dec.success, `the recovered token must be migrated: ${dec.error}`);
+    assert.strictEqual(dec.value, TOKEN_CBC_REAL);
+    assert.strictEqual(reopened.config.apis[1].authToken.split(':').length, 3, 'upgraded to GCM');
+});
+
+test('M1: a whole CBC-era config file is recovered from a drifted hostname', () => {
+    // The other reported shape: a user who never re-saved since before the GCM
+    // switch has the ENTIRE file as 2-segment CBC. Drift used to mean loadError
+    // and zero recovery — and then the destructive advice.
+    const ws = seedDriftedWorkspace('m1outer');
+    // Hand-open the fixture with the key that wrote it — plain decrypt() would
+    // need the sweep, which is the thing under test.
+    const plainValue = gcmOpen(fs.readFileSync(ws.configFile, 'utf8'), hostnameEraKey('fixedhost-2', 600000));
+    const key = hostnameEraKey('fixedhost-2', 10000);
+    const iv = nodeCrypto.randomBytes(16);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
+    let ct = cipher.update(plainValue, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    const cbcBlob = iv.toString('hex') + ':' + ct;
+    for (const suffix of ['', '.bak', '.bak2']) {
+        if (suffix === '' || fs.existsSync(ws.configFile + suffix)) {
+            fs.writeFileSync(ws.configFile + suffix, cbcBlob);
+        }
+    }
+    resetKeyCachesForTests();
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.loadError, null, `a CBC-era file must recover: ${JSON.stringify(mgr.loadError)}`);
+    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha', 'Beta']);
+    assert.strictEqual(mgr.keyHealOutcome, 'saved');
+});
+
+test('M1: a padding-luck hit does not stop the sweep from finding the real key', () => {
+    // The gate lives INSIDE the candidate loop on purpose. If a wrong candidate
+    // produced plausible-looking garbage and the loop treated that as the
+    // answer, the real key — often later in the list — would never be tried.
+    const cryptoModule = require(path.join(REPO, 'lib', 'crypto'));
+    const realKey = hostnameEraKey('fixedhost-2', 10000);
+    const iv = nodeCrypto.randomBytes(16);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', realKey, iv);
+    let ct = cipher.update(TOKEN_CBC_REAL, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    const payload = iv.toString('hex') + ':' + ct;
+
+    os.hostname = () => 'fixedhost-3';
+    resetKeyCachesForTests();
+    try {
+        let calls = 0;
+        const result = cryptoModule.decryptWithRecovery(payload, {
+            // Reject the first thing that decrypts, whatever it is: the sweep
+            // must keep going rather than give up or accept it.
+            trust: (value) => { calls++; return calls > 1 && value === TOKEN_CBC_REAL; },
+        });
+        assert.ok(calls >= 1, 'the gate must be consulted inside the loop');
+        assert.strictEqual(result.success, calls > 1,
+            'a rejected candidate must not end the search');
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
+});
+
 test('BL-1: a CBC token that opens under the CURRENT hostname is still healed', () => {
     // The legitimate case must keep working: a genuine pre-GCM token whose key
     // is the current hostname's legacy key gets upgraded to GCM + stable key.
