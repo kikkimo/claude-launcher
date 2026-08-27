@@ -404,6 +404,134 @@ test('MJ-3: a config already on the current key is NOT rewritten', () => {
     assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), afterHeal);
 });
 
+console.log('\n=== M6: the reported bug shape — a hostname carrying a search domain ===\n');
+
+test('M6: a config written under Foo-2.local is recovered and healed under Foo-3.local', () => {
+    // The candidate rules are unit-tested, but nothing ever drove a DOMAINED
+    // hostname through the real encrypt -> load -> heal path — and a name like
+    // `Foo-3.local` is precisely what gethostname() returns when
+    // `scutil --get HostName` is unset, i.e. the reported bug shape. The wiring
+    // between legacyHostnameCandidates() and crypto's candidate identities had
+    // no integration coverage at all.
+    const ws = seedDriftedWorkspace('m6', { outerKey: hostnameEraKey('Foo-2.local', 600000) });
+    const mgr = loadUnderHostname(ws.configFile, 'Foo-3.local');
+
+    assert.strictEqual(mgr.loadError, null,
+        `a domained hostname must recover like any other: ${JSON.stringify(mgr.loadError)}`);
+    assert.strictEqual(mgr.keyStale, true);
+    assert.strictEqual(mgr.keyHealOutcome, 'saved');
+    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha', 'Beta']);
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    const token = decrypt(reopened.config.apis[0].authToken);
+    assert.ok(token.success && token.value === ws.plaintextTokens[0],
+        'and its tokens must be migrated to the current key');
+});
+
+test('M6: a multi-label DHCP search domain works the same way', () => {
+    const ws = seedDriftedWorkspace('m6b', {
+        outerKey: hostnameEraKey('bar-2.hsd1.ca.comcast.net', 600000),
+    });
+    const mgr = loadUnderHostname(ws.configFile, 'bar-3.hsd1.ca.comcast.net');
+    assert.strictEqual(mgr.loadError, null, JSON.stringify(mgr.loadError));
+    assert.strictEqual(mgr.keyHealOutcome, 'saved');
+    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha', 'Beta']);
+});
+
+console.log('\n=== M3/M5: the per-field read-back guarantee the docstring claims ===\n');
+
+test('M3: a field that fails its read-back is never written, and the heal abandons', () => {
+    // The docstring promises "every re-encrypted field must decrypt back to the
+    // exact plaintext before anything is assigned", and nothing exercised it —
+    // the check could be deleted outright and the suite stayed green.
+    //
+    // With correct crypto the check cannot fail (string -> utf8 -> string is
+    // idempotent), so this overrides the CHECK, not the cipher: the behaviour
+    // under test is what happens when it reports failure, and simulating a
+    // cipher round-trip that lies would be faking the thing we rely on.
+    const ws = seedDriftedWorkspace('m3');
+    const before = fs.readFileSync(ws.configFile, 'utf8');
+
+    class VerifyAlwaysFails extends ApiManager {
+        _verifyRoundTrip() { return false; }
+    }
+
+    os.hostname = () => 'fixedhost-3';
+    resetKeyCachesForTests();
+    let mgr;
+    try {
+        mgr = new VerifyAlwaysFails(ws.configFile);
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
+
+    assert.strictEqual(mgr.keyHealOutcome, 'abandoned:verify-failed',
+        'a field we cannot read back must abort the heal, not be written anyway');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before,
+        'and nothing may reach the disk');
+});
+
+test('M3: the same guard covers the reconcile retry path', () => {
+    const ws = seedDriftedWorkspace('m3b');
+    class VerifyAlwaysFails extends ApiManager {
+        _verifyRoundTrip() { return false; }
+    }
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    const healedConfig = JSON.parse(JSON.stringify(mgr.config));
+
+    // Stage the same conflict the reconcile path handles, on an instance whose
+    // read-back always fails.
+    os.hostname = () => 'fixedhost-3';
+    resetKeyCachesForTests();
+    let retrying;
+    try {
+        fs.writeFileSync(ws.configFile, ws.drifted);
+        retrying = new VerifyAlwaysFails(ws.configFile);
+        retrying._diskState = 'a-baseline-that-matches-nothing';
+        retrying.saveConflict = true;
+        fs.writeFileSync(ws.configFile, ws.drifted);
+        const ok = retrying._reconcileHealConflict(healedConfig);
+        assert.strictEqual(ok, false, 'the retry must not write a field it cannot read back');
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
+    assert.strictEqual(retrying.keyHealOutcome, 'abandoned:verify-failed');
+});
+
+console.log('\n=== M8/M5: the recovery scan must not take startup down ===\n');
+
+test('M8: a throwing recovery scan degrades to "no heal this run" instead of crashing', () => {
+    // os.userInfo() throws in containers with no passwd entry — the one crypto
+    // exception that can escape into the constructor. S-7 wrapped the scan, and
+    // removing that wrapper left the whole suite green. Overriding the scan to
+    // throw exercises the handler through the class's own extension point.
+    const ws = seedDriftedWorkspace('m8');
+    const before = fs.readFileSync(ws.configFile, 'utf8');
+
+    class ScanThrows extends ApiManager {
+        _recoverInnerFields() { throw new Error('uid lookup failed: no passwd entry'); }
+    }
+
+    os.hostname = () => 'fixedhost-3';
+    resetKeyCachesForTests();
+    let mgr;
+    try {
+        mgr = new ScanThrows(ws.configFile);
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
+
+    assert.ok(mgr, 'startup must survive');
+    assert.strictEqual(mgr.loadError, null, 'and the config must still load');
+    assert.strictEqual(mgr.keyHealOutcome, 'skipped:recovery-scan-failed',
+        'and it must report why it did not heal');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before);
+});
+
 console.log('\n=== BL-1: CBC garbage must never be re-encrypted over a real token ===\n');
 
 /**
@@ -491,6 +619,55 @@ test('BL-1: a CBC token that opens under the CURRENT hostname is still healed', 
     assert.strictEqual(dec.value, TOKEN_CBC_REAL);
     assert.strictEqual(reopened.config.apis[1].authToken.split(':').length, 3,
         'the upgraded token must be GCM (3 segments)');
+});
+
+test('M2: each sub-condition of the CBC gate carries its own weight', () => {
+    // Measured on real garbage: U+FFFD alone catches 300/300 padding-luck
+    // samples, so the other two conditions were never the reason anything was
+    // rejected and all three could be deleted individually without a single
+    // test noticing. Minimal hand-built fixtures make each one load-bearing.
+    const mgr = new ApiManager(seedDriftedWorkspace('m2gate').configFile);
+
+    // Reachable only via CBC (2 segments); GCM is trusted outright.
+    const cbc = 'aabbccddeeff00112233445566778899:00';
+
+    assert.strictEqual(mgr._isTrustworthyRecovery(cbc, 'sk-good-token-value'), true,
+        'a plausible token must pass');
+    assert.strictEqual(mgr._isTrustworthyRecovery(cbc, 'sk-good\uFFFDtoken-value'), false,
+        'U+FFFD is what lossy UTF-8 decoding of random bytes produces');
+    assert.strictEqual(mgr._isTrustworthyRecovery(cbc, 'sk-good\u0007token-value'), false,
+        'a control character is not a credential, even with no U+FFFD in sight');
+    assert.strictEqual(mgr._isTrustworthyRecovery(cbc, 'sk-short'), false,
+        'and something too short to be a token must not be trusted either');
+
+    // The GCM fast path must stay a fast path: authentication already proved
+    // the key, so a value that would fail the CBC checks is still fine there.
+    const gcm = 'aabbccddeeff001122334455:00:11';
+    assert.strictEqual(mgr._isTrustworthyRecovery(gcm, 'x'), true,
+        'GCM results are authenticated and must not be second-guessed');
+});
+
+test('M4: decryptWithCurrentKey must never touch a 2-segment CBC payload', () => {
+    // The predicate the heal uses to decide "is this already on the current
+    // key". Letting it try the current key on unauthenticated CBC is the same
+    // class of hazard BL-1 closed, one layer up.
+    const cryptoModule = require(path.join(REPO, 'lib', 'crypto'));
+    const key = hostnameEraKey(os.hostname(), 10000);
+    const iv = nodeCrypto.randomBytes(16);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', key, iv);
+    let ct = cipher.update('sk-cbc-current-era-01', 'utf8', 'hex');
+    ct += cipher.final('hex');
+    const cbcPayload = iv.toString('hex') + ':' + ct;
+
+    // Openable on the hot path (single legacy key) ...
+    assert.ok(decrypt(cbcPayload).success, 'precondition: this CBC payload is readable');
+    // ... but the current-key predicate must refuse to consider it at all.
+    const strict = cryptoModule.decryptWithCurrentKey(cbcPayload);
+    assert.strictEqual(strict.success, false,
+        'a 2-segment payload was never written by the current key, and trying it ' +
+        'there is exactly the unauthenticated wrong-key path');
+    assert.ok(/not a current-generation payload/.test(strict.error),
+        'and it must be refused on shape, not merely fail to decrypt');
 });
 
 test('S-9c: a non-cipher-shaped token is left alone, not reported as unrecoverable', () => {
@@ -652,6 +829,12 @@ test('BL-3: an indeterminate save outcome is never reconciled away', () => {
     assert.strictEqual(mgr.keyHealOutcome, 'skipped:indeterminate');
     assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before,
         'nothing may be written while the previous outcome is unknown');
+    // Second, independent assertion (m1): the latch must still block ordinary
+    // saves afterwards, which is the whole reason it exists.
+    mgr.config.apis[0].name = 'RenamedWhileIndeterminate';
+    assert.strictEqual(mgr.saveConfig(), false,
+        'the latch must keep blocking blind writes after the heal declined');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before);
 });
 
 console.log('\n=== MJ-2: reconcile must not overwrite another instance\'s write ===\n');
@@ -732,20 +915,35 @@ test('MJ-1: a failed backup promotion refuses the heal instead of snapshotting g
     assert.ok(fs.existsSync(ws.configFile + '.bak'), 'the only usable generation must not be rotated away');
     assert.strictEqual(fs.readFileSync(ws.configFile + '.bak', 'utf8'), bakBytes,
         '.bak must be byte-identical — it is the only copy of the old key generation');
+    // Second, independent assertion (m1): the config still has to be usable in
+    // memory — refusing to migrate must not mean refusing to work.
+    assert.strictEqual(mgr.loadError, null);
+    assert.deepStrictEqual(mgr.config.apis.map(a => a.name), ['Alpha'],
+        'the generation that loaded is .bak, which predates the second API');
 });
 
-test('MJ-1: the snapshot holds the bytes of the file that actually decrypted', () => {
-    const ws = seedDriftedWorkspace('mj1b');
-    const bakBytes = fs.readFileSync(ws.configFile + '.bak', 'utf8');
-    // Main is corrupt but replaceable, so promotion succeeds and .bak is what
-    // really loaded. The snapshot must be .bak's bytes, not main's corruption.
-    fs.writeFileSync(ws.configFile, 'deadbeef:cafebabe:0011');
+// A test asserting "the snapshot uses _healSourceBytes rather than _diskState"
+// used to sit here. It was removed rather than kept: instrumentation shows the
+// two values are IDENTICAL at every snapshot call (36/36 before BL-4, and still
+// 0 divergences after it), so no fixture can make it fail and it was reporting
+// a guarantee it never checked. See _snapshotPreHealCiphertext for why they
+// cannot diverge and why the distinction is kept anyway.
 
-    loadUnderHostname(ws.configFile, 'fixedhost-3');
-    const snapshot = ws.configFile + '.pre-key-migration';
-    assert.ok(fs.existsSync(snapshot), 'a heal after backup recovery must still snapshot');
-    assert.strictEqual(fs.readFileSync(snapshot, 'utf8'), bakBytes,
-        'snapshotting the corrupt main would permanently occupy the only snapshot slot');
+test('M5: a heal whose save is refused reports it, and writes nothing', () => {
+    // abandoned:save-failed — reachable for real: another instance holding the
+    // write lock. Distinct from a CAS conflict, and it must not be reconciled.
+    const ws = seedDriftedWorkspace('m5save');
+    const lockPath = ws.configFile + '.lock';
+    fs.writeFileSync(lockPath, 'held-by-another-instance');
+    const before = fs.readFileSync(ws.configFile, 'utf8');
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyStale, true, 'precondition: there is a migration to do');
+    assert.strictEqual(mgr.keyHealOutcome, 'abandoned:save-failed',
+        'a refused save is not a conflict and must be reported as its own outcome');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before);
+    assert.strictEqual(mgr.loadError, null, 'and the config stays usable in memory');
+    fs.unlinkSync(lockPath);
 });
 
 console.log('\n=== S-8: no key-generation migration without a snapshot ===\n');
@@ -770,6 +968,31 @@ test('S-8: when the snapshot cannot be written, ordinary saves do not migrate th
     assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), ws.drifted);
     assert.throws(() => mgr._saveOrThrow(), /snapshot|key material|migration/i,
         'the reason must reach the user, not just screen.debug');
+});
+
+test('M9: once the snapshot obstacle is gone, saving works again', () => {
+    // S-8 pinned "refuse to save without a snapshot" but not the other half:
+    // the retry. Without it the user stays permanently blocked after clearing
+    // the obstacle, and every test still passes.
+    const ws = seedDriftedWorkspace('m9');
+    const snapshot = ws.configFile + '.pre-key-migration';
+    fs.mkdirSync(snapshot);
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyHealOutcome, 'blocked:no-snapshot');
+    mgr.config.apis[0].name = 'RenamedWhileBlocked';
+    assert.strictEqual(mgr.saveConfig(), false, 'precondition: blocked');
+
+    // The user removes whatever was occupying the path.
+    fs.rmdirSync(snapshot);
+    mgr.config.apis[0].name = 'RenamedAfterUnblocking';
+    assert.strictEqual(mgr.saveConfig(), true,
+        'the block must lift by itself once a snapshot can be written');
+    assert.ok(fs.existsSync(snapshot), 'and the snapshot must now exist');
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.config.apis[0].name, 'RenamedAfterUnblocking');
 });
 
 console.log('\n=== MJ-4.2: fail-closed key material must explain itself ===\n');

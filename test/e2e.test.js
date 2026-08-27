@@ -12,7 +12,7 @@
  *   E. TUI smoke under hijacked $HOME (menu renders; corruption/recovery warnings show)
  */
 
-require('./helpers/isolate-key-material');
+const { childEnv } = require('./helpers/isolate-key-material');
 
 const assert = require('assert');
 const { execFileSync, spawnSync } = require('child_process');
@@ -204,7 +204,7 @@ function runLauncherChild(script, dir, timeoutMs = 15000) {
         cwd: REPO,
         encoding: 'utf8',
         timeout: timeoutMs,
-        env: { ...process.env, PATH: path.join(dir, 'bin') + path.delimiter + process.env.PATH },
+        env: childEnv({ PATH: path.join(dir, 'bin') + path.delimiter + process.env.PATH }),
     });
     return r;
 }
@@ -352,7 +352,7 @@ function runTui(home, timeoutMs = 10000) {
         encoding: 'utf8',
         timeout: timeoutMs,
         input: '',
-        env: { ...process.env, HOME: home, TERM: 'xterm-256color' },
+        env: childEnv({ HOME: home, TERM: 'xterm-256color' }),
     });
 }
 

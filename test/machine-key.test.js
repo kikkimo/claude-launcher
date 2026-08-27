@@ -277,6 +277,24 @@ test('S-5: inspecting key material health does not probe or create a sidecar', (
         'the launcher constructs an ApiManager at module load, before the user does anything');
 });
 
+test('S-5: the health check used by crypto is the non-probing one', () => {
+    // m1: the only test that could catch lib/crypto.js swapping inspectPinned()
+    // back to getStableIdentity() lived in the e2e suite. Assert it here too,
+    // where the failure is one line instead of a launcher run: asking crypto
+    // about key material health must not bring a sidecar into existence.
+    freshSidecarDir('s5c');
+    const cryptoModule = require('../lib/crypto');
+    cryptoModule.resetKeyCachesForTests();
+    const health = cryptoModule.keyMaterialHealth();
+    assert.strictEqual(health.ok, true);
+    assert.strictEqual(fs.existsSync(process.env.CLAUDE_LAUNCHER_KEY_FILE), false,
+        'a health check must not probe or pin — it runs before the user has asked for anything');
+    // And the real derivation still does create it, so this is not just a
+    // module that never works.
+    cryptoModule.encrypt('now-a-key-is-needed');
+    assert.strictEqual(fs.existsSync(process.env.CLAUDE_LAUNCHER_KEY_FILE), true);
+});
+
 test('S-5: inspecting still fails closed on a corrupt sidecar', () => {
     const dir = freshSidecarDir('s5b');
     fs.writeFileSync(path.join(dir, 'machine.json'), 'not json at all');
@@ -416,8 +434,12 @@ test('R4: no duplicates, capped, and no whitespace-bearing ComputerName values',
         localHostName: 'FangYideMacBook-Pro-3',
     });
     assert.strictEqual(new Set(list).size, list.length, 'candidates must be deduplicated');
-    assert.ok(list.length <= 44, `candidate list must stay capped, got ${list.length}`);
-    assert.ok(list.length <= machineKey.MAX_CANDIDATES);
+    // A real bound, not a tautology against the module's own constant: every
+    // extra candidate is another ~45ms of PBKDF2 blocking the first render on
+    // the miss path, so a change that widens the sweep has to be a deliberate
+    // one. Measured worst cases today: 8 plain / 24 one domained / 32 both.
+    assert.ok(list.length <= 32,
+        `candidate list grew to ${list.length}; each entry costs ~45ms of PBKDF2 on a miss`);
     for (const c of list) {
         assert.ok(!/\s/.test(c), `candidate "${c}" contains whitespace — ComputerName was never a gethostname() value`);
         assert.ok(c.length > 0);

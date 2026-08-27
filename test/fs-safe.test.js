@@ -8,7 +8,12 @@
  * creation race silently overwrites the winner's key material, and the winner's
  * encrypted data becomes unreadable.
  *
- * The concurrency test uses real competing processes, not a simulated race.
+ * The concurrency test uses real competing processes, not a simulated race —
+ * instrumentation confirms the EEXIST branch is genuinely taken (3 creations
+ * attempted, 4 link-EEXIST hits in one run). Two honest limits: the assertions
+ * themselves cannot distinguish a real race from lucky serialisation, and the
+ * ENOSYS/EPERM hard-link fallback is unreachable on darwin, so that branch is
+ * exercised only by code review, not by this suite.
  */
 
 require('./helpers/isolate-key-material');
