@@ -685,6 +685,41 @@ test('MJ-9: alternating hostnames do not rewrite the config on every launch', ()
         'once both names are known, no launch may rewrite the config on its own');
 });
 
+test('MJ-9: both alternating candidate sets stay remembered, so neither re-sweeps', () => {
+    // The half the "no rewrite" assertion cannot see: with one fingerprint per
+    // digest, returning to a name already visited finds the OTHER name's entry
+    // and pays for the full sweep again, every single time.
+    const lost = nodeCrypto.randomBytes(32);
+    const ws = seedDriftedWorkspace('mj9c', {
+        outerKey: hostnameEraKey('Bar-2', 600000),
+        tokenKeys: [hostnameEraKey('Bar-2', 600000), lost],
+    });
+
+    const timedLaunch = (hostname) => {
+        resetKeyCachesForTests();
+        os.hostname = () => hostname;
+        const started = process.hrtime.bigint();
+        try {
+            new ApiManager(ws.configFile);
+        } finally {
+            os.hostname = realHostname;
+        }
+        return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+
+    const firstBar3 = timedLaunch('Bar-3');  // sweeps, records Bar-3's set
+    const firstBar2 = timedLaunch('Bar-2');  // sweeps, records Bar-2's set
+    const againBar3 = timedLaunch('Bar-3');  // must be remembered, not re-swept
+    const againBar2 = timedLaunch('Bar-2');
+
+    const slowest = Math.max(firstBar3, firstBar2);
+    assert.ok(slowest > 150,
+        `sanity: an uncached sweep should cost real PBKDF2 time, got ${slowest.toFixed(0)}ms`);
+    assert.ok(againBar3 < slowest / 3 && againBar2 < slowest / 3,
+        `returning to a known name must hit the memo: ${firstBar3.toFixed(0)}/${firstBar2.toFixed(0)} ` +
+        `then ${againBar3.toFixed(0)}/${againBar2.toFixed(0)}ms`);
+});
+
 test('MJ-9: the negative cache is not user data and never reaches the config or an export', () => {
     const lost = nodeCrypto.randomBytes(32);
     const ws = seedDriftedWorkspace('mj9b', {
