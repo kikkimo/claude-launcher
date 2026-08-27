@@ -2019,6 +2019,13 @@ async function showMenu() {
     } else if (apiManager.recoveredFromBackup) {
         healthLines.push(colors.yellow + '  ⚠️  ' +
             i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset);
+        // "Recovered from backup" is a reassuring sentence about an event that
+        // silently moved the config BACK in time. Say where the generation it
+        // replaced went, so the user can judge what may have been lost.
+        if (apiManager.supersededGeneration) {
+            healthLines.push(colors.gray + '      ' +
+                i18n.tSync('warnings.superseded_preserved', apiManager.supersededGeneration) + colors.reset);
+        }
         apiManager.recoveredFromBackup = false; // warn once per run
     }
 

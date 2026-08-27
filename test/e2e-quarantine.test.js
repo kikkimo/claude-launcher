@@ -87,13 +87,26 @@ function seedUnreadableHome(home) {
     return { cfg, bytes };
 }
 
-function runLauncher(home, sidecar, input) {
+const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-e3-stub-'));
+
+/** A --require preload pinning os.hostname() inside the launcher process. */
+function hostnameStub(name) {
+    const file = path.join(stubDir, `hostname-${name}.js`);
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, `const os = require('os'); os.hostname = () => ${JSON.stringify(name)};\n`);
+    }
+    return file;
+}
+
+function runLauncher(home, sidecar, input, hostname) {
+    const env = { HOME: home, TERM: 'xterm-256color', CLAUDE_LAUNCHER_KEY_FILE: sidecar };
+    if (hostname) env.NODE_OPTIONS = `--require ${hostnameStub(hostname)}`;
     return spawnSync(process.execPath, [path.join(REPO, 'claude-launcher')], {
         cwd: REPO,
         encoding: 'utf8',
         timeout: 25000,
         input: input || '',
-        env: childEnv({ HOME: home, TERM: 'xterm-256color', CLAUDE_LAUNCHER_KEY_FILE: sidecar }),
+        env: childEnv(env),
     });
 }
 
@@ -279,6 +292,60 @@ test('B1: quarantine stays disabled while key material is unusable', () => {
     assert.ok(!labels.some(l => /set the unreadable config aside/i.test(l)),
         `the quarantine action must not be offered:\n${labels.join('\n')}`);
     assert.strictEqual(fs.readFileSync(cfg, 'utf8'), before);
+});
+
+test('BL-4: a broken sidecar must not silently roll the config back a generation', () => {
+    // The full user-visible chain, through the real launcher: heal, make a real
+    // edit, break the key material, start once, fix the key material. The edit
+    // must still be there. The old failure mode destroyed it while telling the
+    // user everything had been recovered from backup.
+    const home = makeHome('bl4');
+    const sidecar = path.join(home, 'machine-key.json');
+    const cfg = path.join(home, '.claude-launcher-apis.json');
+    seedUnreadableHome(home);
+
+    // Heal, then edit — which also rotates the healed main into .bak.
+    inChild(home, sidecar, `
+        const os = require('os');
+        os.hostname = () => 'faraway-77';
+        crypto.resetKeyCachesForTests();
+        const mgr = new ApiManager(configFile);
+        return { healed: mgr.keyHealOutcome };
+    `);
+    const edited = inChild(home, sidecar, `
+        const mgr = new ApiManager(configFile);
+        mgr.updateApiField(mgr.getApis()[0].id, 'name', 'RenamedAfterHeal');
+        return { names: mgr.getApis().map(a => a.name) };
+    `);
+    assert.deepStrictEqual(edited.names, ['RenamedAfterHeal'], 'precondition: the edit landed');
+    const mainBefore = fs.readFileSync(cfg, 'utf8');
+
+    // The .bak2 left behind is still on the pre-heal hostname key, i.e. exactly
+    // the older generation the loader used to promote over main.
+    fs.writeFileSync(sidecar, JSON.stringify({ v: 9, source: 'ioreg', id: 'from-the-future' }));
+    // A NEIGHBOUR of the name .bak2 was written under, so that older generation
+    // is genuinely reachable by the candidate sweep — which is the whole
+    // premise of this bug. With the real hostname it would be unreachable and
+    // the promotion branch would never even be tried.
+    const run = runLauncher(home, sidecar, '', 'faraway-78');
+    assert.strictEqual(run.status, 0);
+    const out = stripAnsi(run.stdout);
+    assert.ok(!/recovered automatically from backup/i.test(out),
+        `a global key failure must not be reported as a recovered backup:\n${out.slice(-700)}`);
+    assert.ok(out.includes(sidecar), 'the real cause must be named');
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), mainBefore,
+        'and the newest generation must be untouched');
+
+    // The user fixes the key material, as the message tells them to.
+    fs.rmSync(sidecar);
+    const after = inChild(home, sidecar, `
+        const mgr = new ApiManager(configFile);
+        return { loadError: mgr.loadError, names: mgr.getApis().map(a => a.name) };
+    `);
+    assert.strictEqual(after.loadError, null);
+    assert.deepStrictEqual(after.names, ['RenamedAfterHeal'],
+        'the edit made after the heal must survive — this is the data the old ' +
+        'behaviour destroyed while reporting success');
 });
 
 console.log('\n=== M3.1: a degraded identity must never migrate the key generation ===\n');
