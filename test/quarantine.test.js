@@ -254,6 +254,75 @@ test('R11: quarantine refuses when there is nothing wrong to quarantine', () => 
     assert.deepStrictEqual(snapshotDir(dir), before, 'a healthy config must never be moved');
 });
 
+console.log('\n=== MJ-5/MJ-10: an orphaned snapshot must not lock the launcher down ===\n');
+
+test('MJ-5: quarantining does not permanently disable password setup and import/export', () => {
+    // Quarantine is this release's own recovery route, and it lands the user in
+    // a state with a snapshot and no config. Suppressing the first-run wizard
+    // there also suppresses the ONLY path to setExportPassword(), which gates
+    // import/export — permanently, on every later launch.
+    const ws = seedUnreadable('mj5', 'homehost-2');
+    const mgr = loadUnder(ws.configFile, 'homehost-3');
+    assert.strictEqual(mgr.quarantineUnreadableConfig().ok, true);
+
+    resetKeyCachesForTests();
+    const restarted = loadUnder(ws.configFile, 'homehost-3');
+    assert.strictEqual(restarted.loadError, null, 'precondition: usable again');
+    assert.strictEqual(restarted.config.apis.length, 0);
+    assert.strictEqual(restarted.isFirstTimeUsage(), true,
+        'an empty config with nothing blocking saves IS a first run — the snapshot is ' +
+        'surfaced in the banner, which is what stops it looking like a fresh install');
+    restarted.skipPasswordSetup();
+    assert.strictEqual(restarted.config.passwordSkipped, true, 'and the wizard must be usable');
+});
+
+test('MJ-5: an UNREADABLE orphan snapshot is reported too, never silently', () => {
+    // snapshotNotice took listSnapshots()[0] unfiltered while the banner only
+    // printed readable ones, so an unreadable orphan suppressed the wizard and
+    // said nothing at all. The only way out the user could find was deleting
+    // the snapshot — the last copy of their tokens.
+    const ws = seedUnreadable('mj5b', 'faraway-77');
+    const snapshot = `${ws.configFile}.pre-key-migration.deadbeefcafe`;
+    fs.writeFileSync(snapshot, JSON.stringify({
+        v: 1, source: 'ioreg', idHint: 'aaaaaaaaaaaa', savedAt: '2026-01-01T00:00:00.000Z',
+        ciphertext: gcmWithKey('{"apis":[]}', nodeCrypto.randomBytes(32)),
+    }));
+    for (const suffix of ['', '.bak', '.bak2']) fs.rmSync(ws.configFile + suffix, { force: true });
+
+    const mgr = loadUnder(ws.configFile, 'runtime-1');
+    assert.ok(mgr.snapshotNotice, 'an orphan snapshot must be surfaced whether or not it opens');
+    assert.strictEqual(mgr.snapshotNotice.readable, false);
+    assert.strictEqual(mgr.snapshotNotice.path, snapshot);
+});
+
+test('MJ-10: an unreadable orphan snapshot is not re-swept on every launch', () => {
+    const ws = seedUnreadable('mj10', 'faraway-77');
+    fs.writeFileSync(`${ws.configFile}.pre-key-migration.deadbeefcafe`, JSON.stringify({
+        v: 1, source: 'ioreg', idHint: 'aaaaaaaaaaaa', savedAt: '2026-01-01T00:00:00.000Z',
+        ciphertext: gcmWithKey('{"apis":[]}', nodeCrypto.randomBytes(32)),
+    }));
+    for (const suffix of ['', '.bak', '.bak2']) fs.rmSync(ws.configFile + suffix, { force: true });
+
+    const timed = () => {
+        resetKeyCachesForTests();
+        os.hostname = () => 'runtime-1';
+        const started = process.hrtime.bigint();
+        try {
+            new ApiManager(ws.configFile);
+        } finally {
+            os.hostname = realHostname;
+        }
+        return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+
+    const first = timed();
+    const second = timed();
+    assert.ok(first > 150, `sanity: the first verification should really sweep, got ${first.toFixed(0)}ms`);
+    assert.ok(second < first / 3,
+        `verifying an unreachable snapshot must be remembered, not repaid every launch: ` +
+        `${first.toFixed(0)}ms then ${second.toFixed(0)}ms`);
+});
+
 console.log('\n=== BL-4: a global failure must never be treated as a broken file ===\n');
 
 /**
