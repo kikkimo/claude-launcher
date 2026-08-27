@@ -265,6 +265,50 @@ test('S-6: probe reports a timeout distinguishably from a definite failure', () 
     assert.strictEqual(machineKey.probe('darwin', io({})), null);
 });
 
+test('M-2(a): probes use absolute paths, so a stripped PATH is not "no such machine id"', () => {
+    const stub = io({ exec: { '/usr/sbin/ioreg': IOREG_REAL } });
+    const result = machineKey.probe('darwin', stub);
+    assert.ok(result && result.id, `ioreg must be invoked by absolute path, got ${JSON.stringify(result)}`);
+    assert.strictEqual(stub.calls[0].cmd, '/usr/sbin/ioreg');
+});
+
+test('M-2(a): a spawn-layer failure is retryable, not a verdict', () => {
+    // ENOENT/EACCES/EAGAIN mean "could not ask" — a stripped PATH, a sandbox, a
+    // fork limit. Treating them as "this machine has no stable id" pins the
+    // DRIFTING hostname permanently, and getStableIdentity never probes again.
+    for (const code of ['ENOENT', 'EACCES', 'EAGAIN', 'EMFILE']) {
+        const error = Object.assign(new Error(code), { code });
+        const result = machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': error } }));
+        assert.ok(result && result.timedOut === true,
+            `${code} must be retryable, got ${JSON.stringify(result)}`);
+        assert.strictEqual(machineKey.pinDecision(result, 'FangYideMBP-3').pin, false,
+            `${code} must not pin a drifting hostname`);
+    }
+});
+
+test('M-2(a): output we could read but not use IS a verdict', () => {
+    // We asked and got an answer; asking again will not change it.
+    assert.strictEqual(machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': IOREG_NO_UUID } })), null);
+    assert.strictEqual(machineKey.pinDecision(null, 'somehost').pin, true);
+});
+
+test('M-2(a): the current probe result joins the candidate set', () => {
+    // Direction that was unrecoverable: data written under an ioreg identity,
+    // then the sidecar is lost AND probing later fails, so the runtime identity
+    // falls back to the hostname. The candidate sweep only ever offered
+    // hostname families, so that ciphertext could never be opened again.
+    const candidates = machineKey.identityCandidates({
+        probed: { source: 'ioreg', id: 'A0C5A880-EE6D-582D-8836-9C77080D904A' },
+        hostname: 'FangYideMBP-3',
+        localHostName: null,
+    });
+    assert.ok(candidates.includes('A0C5A880-EE6D-582D-8836-9C77080D904A'),
+        'a probeable identity must be recoverable too, not just hostnames');
+    assert.ok(candidates.includes('FangYideMBP-3'), 'and the hostname family stays');
+    assert.ok(candidates.includes('FangYideMBP-2'));
+    assert.strictEqual(new Set(candidates).size, candidates.length, 'no duplicates');
+});
+
 console.log('\n=== machine-key: probing stays lazy (S-5) ===\n');
 
 test('S-5: inspecting key material health does not probe or create a sidecar', () => {
