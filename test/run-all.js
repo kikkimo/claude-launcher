@@ -28,6 +28,7 @@ const FILES = [
     'crypto.test.js',
     'key-heal.test.js',
     'quarantine.test.js',
+    'export-placeholder.test.js',
     'api-manager.test.js',
     'edit-api.test.js',
     'password-guard.test.js',
@@ -49,6 +50,7 @@ const FILES = [
     'env-vars-ui.test.js',
     'e2e.test.js',
     'e2e-key-drift.test.js',
+    'e2e-quarantine.test.js',
 ];
 
 const results = [];
