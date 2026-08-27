@@ -946,6 +946,125 @@ test('M5: a heal whose save is refused reports it, and writes nothing', () => {
     fs.unlinkSync(lockPath);
 });
 
+console.log('\n=== B-1: one snapshot slot cannot carry a per-migration guarantee ===\n');
+
+/** Read a snapshot in either format: legacy raw ciphertext, or the header doc. */
+function snapshotCiphertext(filePath) {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (raw.startsWith('{')) return JSON.parse(raw).ciphertext;
+    return raw;
+}
+
+function snapshotsFor(configFile) {
+    const dir = path.dirname(configFile);
+    const base = path.basename(configFile);
+    return fs.readdirSync(dir)
+        .filter(name => name.startsWith(base + '.pre-key-migration'))
+        .map(name => path.join(dir, name));
+}
+
+test('B-1: a stale snapshot must not let a migration run unprotected', () => {
+    // The single slot used to be checked only for "exists and is non-empty", so
+    // any leftover — a crashed partial write, or the snapshot of an EARLIER
+    // migration — satisfied the guard while the current pre-state was never
+    // preserved. That matters because the heal consumes one generation and two
+    // ordinary saves later the old key's ciphertext exists ONLY in the snapshot.
+    const ws = seedDriftedWorkspace('b1stale');
+    fs.writeFileSync(ws.configFile + '.pre-key-migration', 'GARBAGE-NOT-A-CONFIG-AT-ALL');
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyHealOutcome, 'saved', 'the migration itself should still succeed');
+
+    const preserved = snapshotsFor(ws.configFile).map(snapshotCiphertext);
+    assert.ok(preserved.includes(ws.drifted),
+        'the ciphertext this migration replaced must be preserved somewhere — ' +
+        'a leftover in the slot cannot stand in for it');
+});
+
+test('B-1: two different migrations keep two snapshots, neither overwriting the other', () => {
+    const ws = seedDriftedWorkspace('b1two');
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+    const firstPreState = ws.drifted;
+
+    // A second, different pre-state: roll the file back to another old key.
+    const secondKey = hostnameEraKey('fixedhost-5', 600000);
+    const config = JSON.parse(decrypt(fs.readFileSync(ws.configFile, 'utf8')).value);
+    const secondPreState = gcmWithKey(JSON.stringify(config, null, 2), secondKey);
+    fs.writeFileSync(ws.configFile, secondPreState);
+    resetKeyCachesForTests();
+    loadUnderHostname(ws.configFile, 'fixedhost-6');
+
+    const preserved = snapshotsFor(ws.configFile).map(snapshotCiphertext);
+    assert.ok(preserved.includes(firstPreState), 'the first migration keeps its snapshot');
+    assert.ok(preserved.includes(secondPreState),
+        'and the second migration gets its OWN — reporting the invariant while ' +
+        'silently sharing one slot is the defect');
+});
+
+test('B-1: a legacy headerless snapshot of this same pre-state is honored, not duplicated', () => {
+    const ws = seedDriftedWorkspace('b1legacy');
+    const legacyPath = ws.configFile + '.pre-key-migration';
+    fs.writeFileSync(legacyPath, ws.drifted); // exactly what an older build wrote
+
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(fs.readFileSync(legacyPath, 'utf8'), ws.drifted,
+        'an existing headerless snapshot must never be rewritten or invalidated');
+    assert.strictEqual(snapshotsFor(ws.configFile).length, 1,
+        'and it already covers this pre-state, so no second copy is needed');
+});
+
+console.log('\n=== M-2(b): the snapshot must be self-describing and reachable ===\n');
+
+test('M-2(b): the snapshot carries a header, and the machine id is NOT in it', () => {
+    const ws = seedDriftedWorkspace('s2header');
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+
+    const files = snapshotsFor(ws.configFile);
+    assert.strictEqual(files.length, 1);
+    const doc = JSON.parse(fs.readFileSync(files[0], 'utf8'));
+    assert.strictEqual(doc.v, 1);
+    assert.ok(typeof doc.source === 'string' && doc.source.length > 0, 'the identity source');
+    assert.ok(/^[0-9a-f]{12}$/.test(doc.idHint), 'a verifiable hint, not the id itself');
+    assert.ok(typeof doc.savedAt === 'string' && doc.savedAt.includes('T'), 'when it was taken');
+    assert.strictEqual(doc.ciphertext, ws.drifted);
+
+    // The value that must NOT be recoverable from this file: the snapshot sits
+    // next to the config, so anything here leaks with the config. The id is the
+    // key input for the CURRENT ciphertext, so writing it plainly would undo the
+    // one guarantee this encryption provides — that a copied config is useless.
+    const identity = JSON.parse(fs.readFileSync(ws.sidecar, 'utf8'));
+    assert.ok(!JSON.stringify(doc).includes(identity.id),
+        'the machine id must not appear in a file that travels with the config');
+    assert.strictEqual(doc.idHint,
+        nodeCrypto.createHash('sha256').update(identity.id).digest('hex').slice(0, 12),
+        'the hint must let a human VERIFY a re-probed identity without revealing it');
+});
+
+test('M-2(b): an orphaned snapshot is reported instead of looking like first-time usage', () => {
+    // Real sequence: heal, then two ordinary saves age the old key out of
+    // main/.bak/.bak2, then the generations are lost (disk fault, partial
+    // restore, rm). The snapshot beside them still holds every API, but nothing
+    // read it — the launcher just showed an empty config as a new install.
+    const ws = seedDriftedWorkspace('orphan');
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+    const snapshot = snapshotsFor(ws.configFile)[0];
+    assert.ok(snapshot, 'precondition: a snapshot exists');
+
+    for (const suffix of ['', '.bak', '.bak2']) {
+        fs.rmSync(ws.configFile + suffix, { force: true });
+    }
+
+    resetKeyCachesForTests();
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.isFirstTimeUsage(), false,
+        'a snapshot on disk means this is not a fresh install');
+    assert.ok(mgr.snapshotNotice, 'the surviving snapshot must be surfaced');
+    assert.strictEqual(mgr.snapshotNotice.readable, true,
+        'and this one is readable — the user only needs to be told it is there');
+    assert.strictEqual(mgr.snapshotNotice.path, snapshot);
+    assert.ok(fs.existsSync(snapshot), 'nothing may be promoted or consumed automatically');
+});
+
 console.log('\n=== S-8: no key-generation migration without a snapshot ===\n');
 
 test('S-8: when the snapshot cannot be written, ordinary saves do not migrate the key either', () => {
