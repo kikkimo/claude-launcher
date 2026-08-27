@@ -285,7 +285,19 @@ Claude Launcher 使用先进的配置系统：
 
 | 文件 | 何时生成 | 怎么处理 |
 |---|---|---|
-| `.claude-launcher-apis.json.pre-key-migration` | 配置首次被重新加密到新密钥世代时 | 请保留，它是迁移前的密文 |
+| `.claude-launcher-apis.json.pre-key-migration.<hash>` | 每次配置被重新加密到新密钥世代时 | 请保留，它是那次迁移前的密文 |
+
+##### 从迁移前快照恢复
+
+启动器**永远不会**自动使用快照——正是这一点让它是安全网，而不是又一个会被轮转掉的文件。如果启动器提示存在可读快照，或者你在丢失全部代际后需要它：
+
+1. 先把所有文件复制一份：`cp ~/.claude-launcher-apis.json* /tmp/backup/`
+2. 查看快照头部（它是 JSON）。`source` 和 `idHint` 描述了拍下它时的机器身份。`idHint` 是 `sha256(<机器身份>)` 的前 12 位十六进制；身份本身**故意不存**，因为这个文件就放在配置旁边、会随配置一起被带走。
+3. 把密文取出来放到位：
+   `node -e 'const fs=require("fs");fs.writeFileSync(process.argv[2],JSON.parse(fs.readFileSync(process.argv[1],"utf8")).ciphertext)' <快照> ~/.claude-launcher-apis.json`
+   （旧版本写的快照没有头部，直接复制即可）
+4. 启动启动器。如果该快照的密钥仍然可达，它会被自动恢复并重新加密；如果不可达，配置会保持原样并被报为不可读。
+
 | `.claude-launcher-apis.json*.unreadable.N` | 你选择了「隔离无法读取的配置」 | 请保留；如果其密钥重新变得可达，可在 API 管理中用「恢复已隔离的配置」找回 |
 
 

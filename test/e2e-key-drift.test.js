@@ -212,9 +212,14 @@ test('E1: the pre-heal ciphertext survives in a non-rotating snapshot', () => {
     const { cfg, bytes } = writeDriftedConfig(home, 'fixedhost-2');
 
     runLauncher({ home, hostname: 'fixedhost-3', sidecar });
-    const snapshot = cfg + '.pre-key-migration';
+    // Content-addressed slot: one per pre-state, so a later migration of a
+    // different pre-state cannot quietly reuse this one's file.
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 12);
+    const snapshot = `${cfg}.pre-key-migration.${digest}`;
     assert.ok(fs.existsSync(snapshot), 'snapshot must exist after a heal');
-    assert.strictEqual(fs.readFileSync(snapshot, 'utf8'), bytes, 'snapshot must be the exact pre-heal bytes');
+    const doc = JSON.parse(fs.readFileSync(snapshot, 'utf8'));
+    assert.strictEqual(doc.ciphertext, bytes, 'snapshot must hold the exact pre-heal bytes');
+    assert.ok(/^[0-9a-f]{12}$/.test(doc.idHint), 'and be self-describing without leaking the id');
     if (process.platform !== 'win32') {
         assert.strictEqual(fs.statSync(snapshot).mode & 0o777, 0o600);
     }

@@ -300,7 +300,26 @@ ever deleted automatically:
 
 | File | When | What to do |
 |---|---|---|
-| `.claude-launcher-apis.json.pre-key-migration` | the first time a config is re-encrypted under a new key generation | keep it; it is the ciphertext from before the migration |
+| `.claude-launcher-apis.json.pre-key-migration.<hash>` | each time a config is re-encrypted under a new key generation | keep it; it is the ciphertext from before that migration |
+
+##### Restoring from a pre-migration snapshot
+
+The launcher never uses a snapshot on its own — that is what keeps it a safety
+net rather than another file that can rotate away. If the launcher tells you a
+readable snapshot exists, or you need one after losing every generation:
+
+1. Make a copy of everything first: `cp ~/.claude-launcher-apis.json* /tmp/backup/`
+2. Look at the snapshot's header — it is JSON. `source` and `idHint` describe the
+   machine identity that was current when it was taken. `idHint` is the first 12
+   hex characters of `sha256(<machine id>)`; the id itself is deliberately not
+   stored, because this file travels next to your config.
+3. Extract the ciphertext into place:
+   `node -e 'const fs=require("fs");fs.writeFileSync(process.argv[2],JSON.parse(fs.readFileSync(process.argv[1],"utf8")).ciphertext)' <snapshot> ~/.claude-launcher-apis.json`
+   (a snapshot written by an older build has no header — copy it as-is)
+4. Start the launcher. If the snapshot's key is still reachable it is recovered
+   and re-encrypted automatically; if not, the config is left untouched and
+   reported as unreadable.
+
 | `.claude-launcher-apis.json*.unreadable.N` | you chose "Set the unreadable config aside" | keep it; "Restore a set-aside config" in API management can bring it back if its key becomes reachable again |
 
 ## 📋 Requirements

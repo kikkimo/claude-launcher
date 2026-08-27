@@ -175,6 +175,27 @@ function loadUnderHostname(configFile, hostname) {
     }
 }
 
+/** Read a snapshot in either format: legacy raw ciphertext, or the header doc. */
+function snapshotCiphertext(filePath) {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (raw.startsWith('{')) return JSON.parse(raw).ciphertext;
+    return raw;
+}
+
+/** The slot a given pre-state lands in. Formula written out by hand, as with the key oracles. */
+function snapshotSlotFor(configFile, ciphertext) {
+    const digest = nodeCrypto.createHash('sha256').update(ciphertext).digest('hex').slice(0, 12);
+    return `${configFile}.pre-key-migration.${digest}`;
+}
+
+function snapshotsFor(configFile) {
+    const dir = path.dirname(configFile);
+    const base = path.basename(configFile);
+    return fs.readdirSync(dir)
+        .filter(name => name.startsWith(base + '.pre-key-migration'))
+        .map(name => path.join(dir, name));
+}
+
 console.log('\n=== R9: a stale key generation forces a save, independent of `migrated` ===\n');
 
 test('R9: a config written under a drifted hostname loads without error', () => {
@@ -219,23 +240,25 @@ test('R9: tokens are re-encrypted too, and open on the hot path in a fresh proce
 test('R9: the pre-heal ciphertext is snapshotted to a non-rotating file', () => {
     const ws = seedDriftedWorkspace('r9d');
     loadUnderHostname(ws.configFile, 'fixedhost-3');
-    const snapshot = ws.configFile + '.pre-key-migration';
-    assert.ok(fs.existsSync(snapshot), 'a pre-migration snapshot must exist');
-    assert.strictEqual(fs.readFileSync(snapshot, 'utf8'), ws.drifted,
+    const files = snapshotsFor(ws.configFile);
+    assert.strictEqual(files.length, 1, 'a pre-migration snapshot must exist');
+    assert.strictEqual(snapshotCiphertext(files[0]), ws.drifted,
         'the snapshot must hold the exact pre-heal bytes');
     if (process.platform !== 'win32') {
-        assert.strictEqual(fs.statSync(snapshot).mode & 0o777, 0o600, 'snapshot must be owner-only');
+        assert.strictEqual(fs.statSync(files[0]).mode & 0o777, 0o600, 'snapshot must be owner-only');
     }
 });
 
 test('R9: the snapshot is created once and never overwritten by later saves', () => {
     const ws = seedDriftedWorkspace('r9e');
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
-    const snapshot = ws.configFile + '.pre-key-migration';
+    const snapshot = snapshotsFor(ws.configFile)[0];
     const firstBytes = fs.readFileSync(snapshot, 'utf8');
     mgr.addApi('https://c.example.com', 'sk-token-gamma-0003', 'claude-sonnet-4', 'Gamma');
     assert.strictEqual(fs.readFileSync(snapshot, 'utf8'), firstBytes,
         'the snapshot must not rotate with normal saves');
+    assert.strictEqual(snapshotsFor(ws.configFile).length, 1,
+        'and an ordinary save must not create new ones');
 });
 
 console.log('\n=== R10: mixed key generations — heal what is recoverable, report the rest ===\n');
@@ -948,21 +971,6 @@ test('M5: a heal whose save is refused reports it, and writes nothing', () => {
 
 console.log('\n=== B-1: one snapshot slot cannot carry a per-migration guarantee ===\n');
 
-/** Read a snapshot in either format: legacy raw ciphertext, or the header doc. */
-function snapshotCiphertext(filePath) {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    if (raw.startsWith('{')) return JSON.parse(raw).ciphertext;
-    return raw;
-}
-
-function snapshotsFor(configFile) {
-    const dir = path.dirname(configFile);
-    const base = path.basename(configFile);
-    return fs.readdirSync(dir)
-        .filter(name => name.startsWith(base + '.pre-key-migration'))
-        .map(name => path.join(dir, name));
-}
-
 test('B-1: a stale snapshot must not let a migration run unprotected', () => {
     // The single slot used to be checked only for "exists and is non-empty", so
     // any leftover — a crashed partial write, or the snapshot of an EARLIER
@@ -1069,9 +1077,9 @@ console.log('\n=== S-8: no key-generation migration without a snapshot ===\n');
 
 test('S-8: when the snapshot cannot be written, ordinary saves do not migrate the key either', () => {
     const ws = seedDriftedWorkspace('s8');
-    const snapshot = ws.configFile + '.pre-key-migration';
-    // Occupy the snapshot path with a directory: createExclusive cannot create
-    // a file there, and it can never be overwritten.
+    const snapshot = snapshotSlotFor(ws.configFile, ws.drifted);
+    // Occupy this pre-state's slot with a directory: createExclusive cannot
+    // create a file there, and it can never be overwritten.
     fs.mkdirSync(snapshot);
 
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
@@ -1094,7 +1102,7 @@ test('M9: once the snapshot obstacle is gone, saving works again', () => {
     // the retry. Without it the user stays permanently blocked after clearing
     // the obstacle, and every test still passes.
     const ws = seedDriftedWorkspace('m9');
-    const snapshot = ws.configFile + '.pre-key-migration';
+    const snapshot = snapshotSlotFor(ws.configFile, ws.drifted);
     fs.mkdirSync(snapshot);
 
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');

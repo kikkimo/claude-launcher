@@ -2050,6 +2050,14 @@ async function showMenu() {
         apiManager.keyMaterialWarned = true;
     }
 
+    // A snapshot that outlived every generation holds the only remaining copy
+    // of the user's APIs. It is never consumed automatically, so saying it is
+    // there is the difference between recovering and losing it.
+    if (apiManager.snapshotNotice && apiManager.snapshotNotice.readable) {
+        healthLines.push(colors.bright + colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.snapshot_available', apiManager.snapshotNotice.path) + colors.reset);
+    }
+
     // Set-aside configs are only ever revisited on request, so say they exist.
     if (!apiManager.loadError && apiManager.listQuarantined().length > 0) {
         healthLines.push(colors.gray + '  ℹ️  ' +
