@@ -70,11 +70,37 @@ function withBrokenToken(label) {
 
 console.log('\n=== R14: export refuses to emit a placeholder as a token ===\n');
 
-test('R14: exporting a config with an undecryptable token is refused, not faked', () => {
+test('MJ-7: one undecryptable token must not block backing up every other API', () => {
+    // Refusing the whole export was a regression against master, and it lands
+    // precisely on the population this release documents: a config where one
+    // token could not be recovered. The goal — never emit a placeholder that
+    // reads like a token — is met by skipping that entry and saying so.
     const { mgr } = withBrokenToken('refuse');
-    assert.throws(() => mgr.exportConfigAuthenticated(),
-        (e) => /decrypt/i.test(e.message) && e.message.includes('Broken'),
-        'the export must name the API it cannot export rather than substituting a placeholder');
+    const exported = mgr.exportConfigAuthenticated();
+    const parsed = JSON.parse(exported);
+
+    assert.deepStrictEqual(parsed.apis.map(a => a.name), ['Good'],
+        'the healthy API must still be exportable');
+    assert.strictEqual(parsed.apis[0].authToken, 'sk-good-token-000001');
+    assert.ok(Array.isArray(parsed.skipped) && parsed.skipped.length === 1,
+        'and the export must say what it left out');
+    assert.strictEqual(parsed.skipped[0].name, 'Broken');
+    assert.ok(/decrypt/i.test(parsed.skipped[0].reason));
+});
+
+test('MJ-7: a plaintext token is exported, not misreported as undecryptable', () => {
+    // Legacy configs hold never-encrypted tokens. Telling the user "its
+    // ciphertext is preserved at X" about a value that was never ciphertext is
+    // simply wrong, and refusing the export over it is worse.
+    const ws = workspace('plaintext');
+    const mgr = new ApiManager(ws.configFile);
+    mgr.addApi('https://a.example.com', 'sk-good-token-000001', 'claude-sonnet-4', 'Good');
+    mgr.config.apis[0].authToken = 'sk-plain-legacy-token';
+
+    const parsed = JSON.parse(mgr.exportConfigAuthenticated());
+    assert.strictEqual(parsed.apis.length, 1);
+    assert.strictEqual(parsed.apis[0].authToken, 'sk-plain-legacy-token',
+        'a value that was never encrypted exports as itself');
 });
 
 test('R14: a healthy config still exports normally', () => {
@@ -104,6 +130,9 @@ for (const placeholder of PLACEHOLDERS) {
         });
 
         const result = mgr.importConfigAuthenticated(payload);
+        assert.ok((result.warnings || []).some(w => w.code === 'PLACEHOLDER_TOKEN'),
+            `MJ-8: an entry imported without a usable token must be reported, ` +
+            `otherwise it looks configured and fails at request time: ${JSON.stringify(result)}`);
         const stored = mgr.getApis().find(a => a.name === 'Imported');
         if (stored) {
             const { decrypt } = require(path.join(REPO, 'lib', 'crypto'));
