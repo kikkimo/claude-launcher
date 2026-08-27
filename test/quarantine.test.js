@@ -261,12 +261,12 @@ test('MJ-5: quarantining does not permanently disable password setup and import/
     // a state with a snapshot and no config. Suppressing the first-run wizard
     // there also suppresses the ONLY path to setExportPassword(), which gates
     // import/export — permanently, on every later launch.
-    const ws = seedUnreadable('mj5', 'homehost-2');
-    const mgr = loadUnder(ws.configFile, 'homehost-3');
+    const ws = seedUnreadable('mj5', 'faraway-77');
+    const mgr = loadUnder(ws.configFile, 'runtime-1');
     assert.strictEqual(mgr.quarantineUnreadableConfig().ok, true);
 
     resetKeyCachesForTests();
-    const restarted = loadUnder(ws.configFile, 'homehost-3');
+    const restarted = loadUnder(ws.configFile, 'runtime-1');
     assert.strictEqual(restarted.loadError, null, 'precondition: usable again');
     assert.strictEqual(restarted.config.apis.length, 0);
     assert.strictEqual(restarted.isFirstTimeUsage(), true,

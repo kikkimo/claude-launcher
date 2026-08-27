@@ -1312,9 +1312,12 @@ test('M-2(b): an orphaned snapshot is reported instead of looking like first-tim
 
     resetKeyCachesForTests();
     const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
-    assert.strictEqual(mgr.isFirstTimeUsage(), false,
-        'a snapshot on disk means this is not a fresh install');
-    assert.ok(mgr.snapshotNotice, 'the surviving snapshot must be surfaced');
+    // Surfacing it is the mechanism, NOT blocking the wizard: suppressing the
+    // first run also suppressed the only route to setExportPassword() and thus
+    // to import/export, permanently (MJ-5).
+    assert.strictEqual(mgr.isFirstTimeUsage(), true,
+        'an empty config with nothing blocking saves is still a first run');
+    assert.ok(mgr.snapshotNotice, 'and the surviving snapshot must be surfaced');
     assert.strictEqual(mgr.snapshotNotice.readable, true,
         'and this one is readable — the user only needs to be told it is there');
     assert.strictEqual(mgr.snapshotNotice.path, snapshot);
