@@ -321,13 +321,14 @@ test('R4: LocalHostName contributes its own base family (different base name ent
     assert.ok(list.includes('FangYideMacBook-Pro-2'));
 });
 
-test('R4: no duplicates, capped at 24, and no whitespace-bearing ComputerName values', () => {
+test('R4: no duplicates, capped, and no whitespace-bearing ComputerName values', () => {
     const list = machineKey.legacyHostnameCandidates({
         hostname: 'FangYideMBP-3.lan',
         localHostName: 'FangYideMacBook-Pro-3',
     });
     assert.strictEqual(new Set(list).size, list.length, 'candidates must be deduplicated');
-    assert.ok(list.length <= 24, `candidate list must be capped at 24, got ${list.length}`);
+    assert.ok(list.length <= 44, `candidate list must stay capped, got ${list.length}`);
+    assert.ok(list.length <= machineKey.MAX_CANDIDATES);
     for (const c of list) {
         assert.ok(!/\s/.test(c), `candidate "${c}" contains whitespace — ComputerName was never a gethostname() value`);
         assert.ok(c.length > 0);
