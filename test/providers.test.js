@@ -3,6 +3,8 @@
  * Verifies model lists, versionAliases, and upgrade detection
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const {
     getProvider,

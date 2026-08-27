@@ -3,6 +3,8 @@
  * Uses async harness since passwordGuard() returns a Promise
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 
 let passed = 0;

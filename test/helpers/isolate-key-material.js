@@ -34,8 +34,13 @@ const REAL_CONFIG = path.join(REAL_HOME, '.claude-launcher-apis.json');
 // The sidecar is fingerprinted alongside the config generations: checking only
 // for its CREATION would miss a run that rewrote an existing one, which is the
 // more damaging case — it changes the key that opens the user's real tokens.
+// Every real file a test could plausibly touch. `.claude-launcher-config.json`
+// earns its place the hard way: env-vars-config.test.js creates it in the real
+// HOME through version-checker's loadConfigSync(), and the guard could not see
+// it because it was not on this list.
+const REAL_LAUNCHER_CONFIG = path.join(REAL_HOME, '.claude-launcher-config.json');
 const REAL_GENERATIONS = [REAL_CONFIG, REAL_CONFIG + '.bak', REAL_CONFIG + '.bak2',
-    REAL_CONFIG + '.pre-key-migration', REAL_SIDECAR];
+    REAL_CONFIG + '.pre-key-migration', REAL_SIDECAR, REAL_LAUNCHER_CONFIG];
 
 /** sha256 of a file's bytes, or null when absent/unreadable. */
 function fingerprint(filePath) {
@@ -73,7 +78,7 @@ function childEnv(extra) {
 // Auto-isolate on require: no test file may forget to call isolate().
 const initialDir = isolate(path.basename(process.argv[1] || 'test', '.js'));
 
-process.on('exit', () => {
+function checkRealFiles() {
     const problems = [];
     if (!sidecarExistedAtStart && fs.existsSync(REAL_SIDECAR)) {
         problems.push(`created ${REAL_SIDECAR}`);
@@ -87,6 +92,19 @@ process.on('exit', () => {
         console.error(`\n  ✗ FATAL: this test run touched real credential files:\n    - ${problems.join('\n    - ')}`);
         process.exitCode = 1;
     }
-});
+    return problems;
+}
+
+process.on('exit', checkRealFiles);
+
+// A test killed with Ctrl-C — the usual response to one that hangs — would
+// otherwise skip the check entirely. Re-raise after checking so the exit status
+// still looks like a signal death.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+        const problems = checkRealFiles();
+        process.exit(problems.length > 0 ? 1 : 130);
+    });
+}
 
 module.exports = { isolate, childEnv, initialDir, REAL_HOME, REAL_SIDECAR, REAL_CONFIG };
