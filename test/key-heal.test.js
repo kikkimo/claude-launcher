@@ -43,7 +43,7 @@ function test(name, fn) {
 
 const REPO = path.join(__dirname, '..');
 const ApiManager = require(path.join(REPO, 'lib', 'api-manager'));
-const { decrypt, resetKeyCachesForTests } = require(path.join(REPO, 'lib', 'crypto'));
+const { decrypt, decryptWithCurrentKey, resetKeyCachesForTests } = require(path.join(REPO, 'lib', 'crypto'));
 
 const realHostname = os.hostname;
 
@@ -456,12 +456,18 @@ test('R13: a CAS conflict during heal is reconciled, not turned into a read-only
         return bytes;
     })();
 
+    const readyPath = path.join(ws.dir, 'child-ready');
     const childScript = path.join(ws.dir, 'child.js');
     fs.writeFileSync(childScript, `
 const fs = require('fs');
 const os = require('os');
 os.hostname = () => 'fixedhost-3';
 const ApiManager = require(${JSON.stringify(path.join(REPO, 'lib', 'api-manager'))});
+// Warm every key cache first, so the load that follows the readiness signal is
+// fast and the parent's publish cannot slip in before the baseline read.
+const crypto = require(${JSON.stringify(path.join(REPO, 'lib', 'crypto'))});
+crypto.decryptWithRecovery(fs.readFileSync(${JSON.stringify(ws.configFile)}, 'utf8'));
+fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
 const mgr = new ApiManager(${JSON.stringify(ws.configFile)});
 let secondSaveOk = null;
 try {
@@ -488,16 +494,29 @@ fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
 
-    // The child has loaded by now and is retrying the lock (its budget is
-    // 20 x 25ms = 500ms, so this 100ms window leaves ample margin).
-    sleepSync(100);
+    // Wait for the child to signal that its CAS baseline is captured and it is
+    // now blocked acquiring the write lock. Without this handshake the parent's
+    // publish could land BEFORE the child's baseline read, in which case the
+    // child simply loads an already-healed config and there is no conflict at
+    // all — which is exactly how the earlier time-based version of this test
+    // passed vacuously.
+    let waited = 0;
+    while (!fs.existsSync(readyPath) && waited < 20000) { sleepSync(10); waited += 10; }
+    assert.ok(fs.existsSync(readyPath), `child never signalled readiness. stderr:\n${stderr}`);
+
     fs.writeFileSync(ws.configFile, healedBytes);
     fs.unlinkSync(lockPath);
 
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + 20000;
     while (!fs.existsSync(resultPath) && Date.now() < deadline) sleepSync(25);
     assert.ok(fs.existsSync(resultPath), `child produced no result. stderr:\n${stderr}`);
     const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+
+    // POSITIVE signal first: the values below are all satisfied on the
+    // no-conflict path too, so without this the test proves nothing.
+    assert.strictEqual(result.keyHealOutcome, 'adopted',
+        `the heal must have hit a real CAS conflict and adopted the other instance's ` +
+        `write; got ${JSON.stringify(result.keyHealOutcome)} — if this says "saved" the race did not happen`);
 
     assert.strictEqual(result.loadError, null, 'child must load the config');
     assert.strictEqual(result.apiCount, 2);
@@ -508,6 +527,168 @@ fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
     assert.strictEqual(
         JSON.parse(decrypt(fs.readFileSync(ws.configFile, 'utf8')).value).apis[0].name,
         'RenamedByChild', 'the child edit must be on disk');
+});
+
+console.log('\n=== BL-3: the indeterminate latch must survive the heal path ===\n');
+
+test('BL-3: an indeterminate save outcome is never reconciled away', () => {
+    // _saveConfigInner sets saveOutcome='indeterminate' AND saveConflict=true
+    // when write-back verification fails and the undo also fails. Treating that
+    // as a CAS conflict would clear the latch that exists to stop all further
+    // blind writes while the filesystem state is unknown — and then write again.
+    const ws = seedDriftedWorkspace('bl3');
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+
+    mgr.saveOutcome = 'indeterminate';
+    mgr._indeterminateSnapshot = JSON.parse(JSON.stringify(mgr.config));
+    mgr.saveConflict = true;
+    const before = fs.readFileSync(ws.configFile, 'utf8');
+
+    const healed = mgr._healKeyGeneration([]);
+    assert.strictEqual(healed, false, 'heal must refuse to run');
+    assert.strictEqual(mgr.saveOutcome, 'indeterminate',
+        'the indeterminate latch must still be set — clearing it re-enables blind writes');
+    assert.strictEqual(mgr.keyHealOutcome, 'skipped:indeterminate');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before,
+        'nothing may be written while the previous outcome is unknown');
+});
+
+console.log('\n=== MJ-2: reconcile must not overwrite another instance\'s write ===\n');
+
+/** Put a manager into the exact pre-conflict state: healed in memory, stale baseline. */
+function stageConflict(label, diskBytes) {
+    const ws = seedDriftedWorkspace(label);
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    const healedConfig = JSON.parse(JSON.stringify(mgr.config));
+    fs.writeFileSync(ws.configFile, diskBytes);
+    mgr._diskState = 'a-baseline-that-matches-nothing';
+    mgr.saveConflict = true;
+    return { ws, mgr, healedConfig };
+}
+
+test('MJ-2: a concurrent write we cannot decrypt at all is left ALONE', () => {
+    // Another writer using a key generation we cannot open (an older release
+    // still installed, or an unpinned-hostname instance). Adopting is
+    // impossible and retrying would silently discard their write.
+    const foreign = gcmWithKey('{"apis":[]}', nodeCrypto.randomBytes(32));
+    const { ws, mgr, healedConfig } = stageConflict('mj2', foreign);
+
+    const ok = mgr._reconcileHealConflict(healedConfig);
+    assert.strictEqual(ok, false, 'the heal must give up, not overwrite');
+    assert.strictEqual(mgr.keyHealOutcome, 'abandoned:foreign-write');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), foreign,
+        "another instance's write must survive untouched");
+});
+
+test('MJ-2: after abandoning, a later user save cannot silently clobber that write', () => {
+    const foreign = gcmWithKey('{"apis":[]}', nodeCrypto.randomBytes(32));
+    const { ws, mgr, healedConfig } = stageConflict('mj2b', foreign);
+    mgr._reconcileHealConflict(healedConfig);
+
+    mgr.config.apis[0].name = 'RenamedAfterAbandon';
+    assert.strictEqual(mgr.saveConfig(), false,
+        'the CAS guard for user-initiated saves must still refuse a stale overwrite');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), foreign);
+});
+
+test('MJ-2: a concurrent write in OUR key generation is retried onto', () => {
+    // Two instances both starting on the same old key generation: the loser
+    // must rebase and finish the migration rather than give up forever.
+    const ws0 = seedDriftedWorkspace('mj2c');
+    const otherGeneration = fs.readFileSync(ws0.configFile, 'utf8'); // still drifted
+    const { ws, mgr, healedConfig } = stageConflict('mj2d', otherGeneration);
+
+    const ok = mgr._reconcileHealConflict(healedConfig);
+    assert.strictEqual(ok, true, `retry must succeed: ${mgr.keyHealOutcome}`);
+    assert.strictEqual(mgr.keyHealOutcome, 'retried');
+    assert.ok(decryptWithCurrentKey(fs.readFileSync(ws.configFile, 'utf8')).success,
+        'the file must end up on the current key generation');
+});
+
+console.log('\n=== MJ-1: the snapshot must hold the ciphertext that actually loaded ===\n');
+
+test('MJ-1: a failed backup promotion refuses the heal instead of snapshotting garbage', () => {
+    const ws = seedDriftedWorkspace('mj1');
+    const bakBytes = fs.readFileSync(ws.configFile + '.bak', 'utf8');
+
+    // Main becomes something readFileSync cannot read and renameSync cannot be
+    // replaced by: a non-empty directory. Loading falls through to .bak, but the
+    // promotion that would repair main fails.
+    fs.rmSync(ws.configFile);
+    fs.mkdirSync(ws.configFile);
+    fs.writeFileSync(path.join(ws.configFile, 'blocker'), 'x');
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.recoveredFromBackup, true, 'precondition: loaded from .bak');
+    assert.strictEqual(mgr.keyHealOutcome, 'skipped:promote-failed',
+        'with main unrepaired, migrating the key generation is not safe');
+
+    const snapshot = ws.configFile + '.pre-key-migration';
+    if (fs.existsSync(snapshot)) {
+        assert.notStrictEqual(fs.readFileSync(snapshot, 'utf8'), '',
+            'a snapshot must never hold the unreadable main bytes');
+    }
+    assert.ok(fs.existsSync(ws.configFile + '.bak'), 'the only usable generation must not be rotated away');
+    assert.strictEqual(fs.readFileSync(ws.configFile + '.bak', 'utf8'), bakBytes,
+        '.bak must be byte-identical — it is the only copy of the old key generation');
+});
+
+test('MJ-1: the snapshot holds the bytes of the file that actually decrypted', () => {
+    const ws = seedDriftedWorkspace('mj1b');
+    const bakBytes = fs.readFileSync(ws.configFile + '.bak', 'utf8');
+    // Main is corrupt but replaceable, so promotion succeeds and .bak is what
+    // really loaded. The snapshot must be .bak's bytes, not main's corruption.
+    fs.writeFileSync(ws.configFile, 'deadbeef:cafebabe:0011');
+
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+    const snapshot = ws.configFile + '.pre-key-migration';
+    assert.ok(fs.existsSync(snapshot), 'a heal after backup recovery must still snapshot');
+    assert.strictEqual(fs.readFileSync(snapshot, 'utf8'), bakBytes,
+        'snapshotting the corrupt main would permanently occupy the only snapshot slot');
+});
+
+console.log('\n=== S-8: no key-generation migration without a snapshot ===\n');
+
+test('S-8: when the snapshot cannot be written, ordinary saves do not migrate the key either', () => {
+    const ws = seedDriftedWorkspace('s8');
+    const snapshot = ws.configFile + '.pre-key-migration';
+    // Occupy the snapshot path with a directory: createExclusive cannot create
+    // a file there, and it can never be overwritten.
+    fs.mkdirSync(snapshot);
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.keyHealOutcome, 'blocked:no-snapshot');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), ws.drifted,
+        'the heal must not have written anything');
+
+    // The invariant must also hold on the ordinary save path — otherwise the
+    // first user edit performs the very migration the heal just refused.
+    mgr.config.apis[0].name = 'RenamedWithoutSnapshot';
+    assert.strictEqual(mgr.saveConfig(), false,
+        'an ordinary save must not migrate the key generation without a snapshot');
+    assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), ws.drifted);
+    assert.throws(() => mgr._saveOrThrow(), /snapshot|key material|migration/i,
+        'the reason must reach the user, not just screen.debug');
+});
+
+console.log('\n=== MJ-4.2: fail-closed key material must explain itself ===\n');
+
+test('MJ-4.2: a save refused because key material is unusable says so', () => {
+    const ws = seedDriftedWorkspace('mj42');
+    fs.writeFileSync(ws.sidecar, '{ corrupt key material');
+    os.hostname = () => 'fixedhost-3';
+    resetKeyCachesForTests();
+    try {
+        const mgr = new ApiManager(ws.configFile);
+        assert.ok(mgr.keyMaterialError, 'precondition: fail-closed state');
+        assert.throws(() => mgr._saveOrThrow(),
+            (e) => /key material/i.test(e.message) && e.message.includes(ws.sidecar),
+            'the error must name the key material file and tell the user to back up the config, ' +
+            'instead of the generic "it was NOT saved"');
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
 });
 
 test('R13: a user-initiated save still refuses on a real CAS conflict (guard not weakened)', () => {
