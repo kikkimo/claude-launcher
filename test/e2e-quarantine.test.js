@@ -284,38 +284,62 @@ test('B1: quarantine stays disabled while key material is unusable', () => {
 console.log('\n=== M3.1: a degraded identity must never migrate the key generation ===\n');
 
 test('M3.1: an unpinned identity blocks the key-generation heal', () => {
-    // When the identity could not be pinned, it is the drifting hostname. Using
-    // it to RE-ENCRYPT is installing the very bug this release removes: the new
-    // ciphertext would be keyed to a name that changes with the next network.
-    const home = makeHome('unpinned');
-    const unwritableSidecar = path.join(home, 'no-such-dir', 'machine-key.json');
-    const { cfg, bytes } = seedUnreadableHome(home);
+    // Two ways to end up unpinned, both of which must refuse to migrate:
+    //   probe ok + cannot persist  -> the identity is stable but unrecorded,
+    //     and the candidate set does not contain probe results, so ciphertext
+    //     written under it is readable only while probing keeps working.
+    //   probe fails + cannot persist -> the identity IS the drifting hostname,
+    //     so migrating would reinstall the very bug this release removes.
+    for (const scenario of [
+        { label: 'probe-ok', env: {} },
+        { label: 'probe-fails', env: { PATH: '/nonexistent-bin' } },
+    ]) {
+        const home = makeHome('unpinned-' + scenario.label);
+        const unwritableSidecar = path.join(home, 'no-such-dir', 'machine-key.json');
+        const { cfg, bytes } = seedUnreadableHome(home);
 
-    const result = inChild(home, unwritableSidecar, `
-        const os = require('os');
-        os.hostname = () => 'faraway-77';
-        crypto.resetKeyCachesForTests();
-        const machineKey = require(${JSON.stringify(path.join(REPO, 'lib', 'machine-key'))});
-        const identity = machineKey.getStableIdentity();
-        const mgr = new ApiManager(configFile);
-        return {
-            pinned: identity.pinned,
-            source: identity.source,
-            loadError: mgr.loadError,
-            keyStale: mgr.keyStale,
-            keyHealOutcome: mgr.keyHealOutcome,
-            apis: mgr.getApis().length,
-        };
-    `);
+        const script = path.join(home, 'probe.js');
+        fs.writeFileSync(script, `
+const fs = require('fs');
+const os = require('os');
+// A NEIGHBOUR of the name the fixture was encrypted under, so the config is
+// recoverable but genuinely on an older generation. Using the same name would
+// make the stable identity equal the fixture key in the probe-fails scenario,
+// leaving nothing to migrate and passing for the wrong reason.
+os.hostname = () => 'faraway-78';
+const ApiManager = require(${JSON.stringify(path.join(REPO, 'lib', 'api-manager'))});
+const machineKey = require(${JSON.stringify(path.join(REPO, 'lib', 'machine-key'))});
+const identity = machineKey.getStableIdentity();
+const mgr = new ApiManager(${JSON.stringify(path.join(home, '.claude-launcher-apis.json'))});
+fs.writeFileSync(process.argv[2], JSON.stringify({
+    pinned: identity.pinned,
+    source: identity.source,
+    loadError: mgr.loadError,
+    keyStale: mgr.keyStale,
+    keyHealOutcome: mgr.keyHealOutcome,
+    apis: mgr.getApis().length,
+}));
+`);
+        const resultPath = script + '.json';
+        const run = spawnSync(process.execPath, [script, resultPath], {
+            encoding: 'utf8',
+            timeout: 25000,
+            env: childEnv(Object.assign({ HOME: home, CLAUDE_LAUNCHER_KEY_FILE: unwritableSidecar }, scenario.env)),
+        });
+        assert.strictEqual(run.status, 0, `${scenario.label}: ${(run.stderr || '').slice(0, 400)}`);
+        const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
 
-    assert.strictEqual(result.pinned, false, 'precondition: the identity could not be pinned');
-    assert.strictEqual(result.source, 'hostname');
-    assert.strictEqual(result.loadError, null, 'the config must still be readable');
-    assert.strictEqual(result.apis, 1, 'and usable');
-    assert.strictEqual(result.keyHealOutcome, 'skipped:identity-unpinned',
-        'but it must NOT be re-encrypted under a key that is still drifting');
-    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), bytes,
-        'the file must be byte-identical — no migration happened');
+        assert.strictEqual(result.pinned, false,
+            `${scenario.label} precondition: the identity must not be pinned`);
+        assert.strictEqual(result.keyStale, true,
+            `${scenario.label} precondition: there must actually be a generation to migrate`);
+        assert.strictEqual(result.loadError, null, `${scenario.label}: the config must still be readable`);
+        assert.strictEqual(result.apis, 1, `${scenario.label}: and usable`);
+        assert.strictEqual(result.keyHealOutcome, 'skipped:identity-unpinned',
+            `${scenario.label}: it must NOT be re-encrypted under an identity we cannot stand behind`);
+        assert.strictEqual(fs.readFileSync(cfg, 'utf8'), bytes,
+            `${scenario.label}: the file must be byte-identical — no migration happened`);
+    }
 });
 
 console.log('\n=== E3b: quarantine and restore against real files ===\n');
