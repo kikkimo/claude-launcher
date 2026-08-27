@@ -248,7 +248,8 @@ test('S-6: a TIMED-OUT probe uses the hostname identity but does NOT pin it', ()
     // would freeze the weaker identity forever, so the pin is deferred and the
     // next launch probes again. Data written meanwhile is still recoverable —
     // the hostname family is exactly what the candidate set covers.
-    const decision = machineKey.pinDecision({ timedOut: true }, 'somehost-3');
+    const attemptsPath = path.join(freshSidecarDir('s6timeout'), 'attempts.json');
+    const decision = machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
     assert.strictEqual(decision.identity.source, 'hostname');
     assert.strictEqual(decision.identity.id, 'somehost-3');
     assert.strictEqual(decision.pin, false, 'a transient timeout must not become permanent');
@@ -281,7 +282,8 @@ test('M-2(a): a spawn-layer failure is retryable, not a verdict', () => {
         const result = machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': error } }));
         assert.ok(result && result.timedOut === true,
             `${code} must be retryable, got ${JSON.stringify(result)}`);
-        assert.strictEqual(machineKey.pinDecision(result, 'FangYideMBP-3').pin, false,
+        const attemptsPath = path.join(freshSidecarDir('m2a-' + code), 'attempts.json');
+        assert.strictEqual(machineKey.pinDecision(result, 'FangYideMBP-3', { attemptsPath }).pin, false,
             `${code} must not pin a drifting hostname`);
     }
 });
@@ -307,6 +309,43 @@ test('M-2(a): the current probe result joins the candidate set', () => {
     assert.ok(candidates.includes('FangYideMBP-3'), 'and the hostname family stays');
     assert.ok(candidates.includes('FangYideMBP-2'));
     assert.strictEqual(new Set(candidates).size, candidates.length, 'no duplicates');
+});
+
+test('M3: retryable probe failures are bounded, not retried forever', () => {
+    // On a machine where the probe reliably exceeds its budget — a restricted
+    // sandbox, heavy I/O, a slow cold start — "retry next launch" means forking
+    // and blocking for up to 1.5s on EVERY launch, indefinitely, with nothing
+    // telling the user why startup is slow.
+    const dir = freshSidecarDir('m3bound');
+    const attemptsPath = path.join(dir, 'attempts.json');
+
+    const decisions = [];
+    for (let launch = 1; launch <= 5; launch++) {
+        machineKey.resetForTests();
+        decisions.push(machineKey.pinDecision({ timedOut: true }, 'somehost-3', {
+            attemptsPath,
+        }));
+    }
+
+    assert.deepStrictEqual(decisions.slice(0, 3).map(d => d.pin), [false, false, false],
+        'the first few launches must keep hoping for a real identity');
+    assert.strictEqual(decisions[3].pin, true,
+        'but after enough consecutive timeouts, pin the deterministic fallback ' +
+        'rather than pay the probe on every launch forever');
+    assert.strictEqual(decisions[3].identity.source, 'hostname');
+});
+
+test('M3: a successful probe clears the timeout tally', () => {
+    const dir = freshSidecarDir('m3clear');
+    const attemptsPath = path.join(dir, 'attempts.json');
+    machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+    machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+    const good = machineKey.pinDecision({ source: 'ioreg', id: 'UUID-1' }, 'somehost-3', { attemptsPath });
+    assert.strictEqual(good.pin, true);
+    // A transient patch of slowness must not carry over and cause a later
+    // single timeout to pin the hostname.
+    const next = machineKey.pinDecision({ timedOut: true }, 'somehost-3', { attemptsPath });
+    assert.strictEqual(next.pin, false, 'the tally must have been reset by the success');
 });
 
 console.log('\n=== machine-key: probing stays lazy (S-5) ===\n');

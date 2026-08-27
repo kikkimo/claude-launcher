@@ -555,6 +555,62 @@ test('M8: a throwing recovery scan degrades to "no heal this run" instead of cra
     assert.strictEqual(fs.readFileSync(ws.configFile, 'utf8'), before);
 });
 
+console.log('\n=== M2: a permanently unrecoverable field must not tax every startup ===\n');
+
+test('M2: a miss is remembered, so the next load pays nothing', () => {
+    // A token whose key is gone makes every subsequent startup derive the whole
+    // candidate set — ~700ms-1.4s of PBKDF2, blocking the first render, forever,
+    // with no way for the user to clear it.
+    const lost = nodeCrypto.randomBytes(32);
+    const ws = seedDriftedWorkspace('m2cache', {
+        outerKey: hostnameEraKey('fixedhost-2', 600000),
+        tokenKeys: [hostnameEraKey('fixedhost-2', 600000), lost],
+    });
+    const timeLoad = () => {
+        resetKeyCachesForTests();
+        os.hostname = () => 'fixedhost-3';
+        const started = process.hrtime.bigint();
+        try {
+            return { mgr: new ApiManager(ws.configFile), ms: Number(process.hrtime.bigint() - started) / 1e6 };
+        } finally {
+            os.hostname = realHostname;
+        }
+    };
+
+    const first = timeLoad();
+    assert.strictEqual(first.mgr.keyRecoveryReport.unrecoverable.length, 1,
+        'precondition: one field stays unrecoverable');
+    const second = timeLoad();
+    assert.ok(second.ms < first.ms / 3,
+        `a remembered miss must not re-derive the candidate set: ${first.ms.toFixed(0)}ms then ${second.ms.toFixed(0)}ms`);
+    assert.strictEqual(second.mgr.keyRecoveryReport.unrecoverable.length, 1,
+        'and it must still be reported as unrecoverable');
+});
+
+test('M2: the memo is keyed on the ciphertext AND the candidate set', () => {
+    // The promise that survives caching: if the key becomes reachable again the
+    // field recovers by itself. A plain "gave up" flag would break that; keying
+    // on the candidate fingerprint means a changed hostname retries.
+    const ws = seedDriftedWorkspace('m2key', {
+        outerKey: hostnameEraKey('fixedhost-2', 600000),
+        tokenKeys: [hostnameEraKey('fixedhost-2', 600000), hostnameEraKey('fixedhost-9', 600000)],
+    });
+    const stuck = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(stuck.keyRecoveryReport.unrecoverable.length, 1, 'precondition: out of reach');
+
+    resetKeyCachesForTests();
+    const reachable = loadUnderHostname(ws.configFile, 'fixedhost-8');
+    assert.strictEqual(reachable.keyRecoveryReport.unrecoverable.length, 0,
+        'a different candidate set must invalidate the memo, not be skipped by it');
+});
+
+// A test asserting "no sweep at all while key material is unusable" was
+// proposed and is deliberately NOT here. Since M-2(a) put the probe result in
+// the candidate set, that sweep is no longer provably pointless — it is exactly
+// what lets a config survive a broken sidecar (see the M-2(a) e2e). Skipping it
+// would trade a real recovery for a little startup latency, and the latency is
+// what the memo above is for.
+
 console.log('\n=== BL-1: CBC garbage must never be re-encrypted over a real token ===\n');
 
 /**

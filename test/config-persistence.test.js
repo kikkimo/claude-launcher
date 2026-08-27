@@ -244,6 +244,39 @@ test('legacy 10000-iteration-encrypted apis file loads via fallback and upgrades
         'file on disk must hold the modified data under the current key');
 });
 
+test('m-1: the temp file is tightened before it is rotated into place', () => {
+    // POSIX open() applies its mode only when it CREATES the file, so debris
+    // from a crashed writer keeps whatever mode it had — and the next save
+    // writes a complete, current ciphertext into it at 0644. The window is
+    // transient (the file is renamed or removed immediately), so it cannot be
+    // observed after the fact; assert instead that the tightening happens, and
+    // happens BEFORE the rotation that publishes it.
+    const dir = tmpDir();
+    const cfg = configPath(dir);
+
+    const order = [];
+    class Recording extends ApiManager {
+        _enforceOwnerOnly(paths) {
+            order.push({ event: 'chmod', paths: [].concat(paths) });
+            return super._enforceOwnerOnly(paths);
+        }
+        _fsyncDir(d) {
+            order.push({ event: 'rotated' });
+            return super._fsyncDir(d);
+        }
+    }
+
+    const mgr = new Recording(cfg);
+    mgr.addApi('https://a.example.com', 'sk-tmp-mode-token-01', 'claude-sonnet-4', 'Alpha');
+
+    const tmpChmod = order.findIndex(e => e.event === 'chmod' && e.paths.some(p => p.endsWith('.tmp')));
+    const rotated = order.findIndex(e => e.event === 'rotated');
+    assert.ok(tmpChmod !== -1,
+        'the temp file carries the whole config in clear ciphertext and must be tightened');
+    assert.ok(rotated !== -1 && tmpChmod < rotated,
+        'and tightened before it becomes the live config, not after');
+});
+
 // --- loadConfig corruption recovery & guards ---
 
 /** Corrupt the main config file in place, like an interrupted legacy write. */
