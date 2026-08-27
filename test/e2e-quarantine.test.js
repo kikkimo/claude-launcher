@@ -230,6 +230,94 @@ test('E3a: the quarantine action is gated on that confirmation', () => {
         'cannot fall through to quarantining the config');
 });
 
+console.log('\n=== B1: a broken sidecar must not be diagnosed as a broken config ===\n');
+
+test('B1: corrupt key material names the sidecar and never advises deleting the config', () => {
+    // The failure chain: an unparseable sidecar makes every generation fail to
+    // decrypt, which sets loadError, which renders the config-unreadable
+    // warning. The config bytes are perfectly fine — the fix is to remove ONE
+    // regenerable file — but a message about the config file invites the user
+    // to destroy their tokens instead.
+    const home = makeHome('keymat');
+    const sidecar = path.join(home, 'machine-key.json');
+    const { cfg, bytes } = seedUnreadableHome(home);
+    // Make the config readable in principle: re-key it under the CURRENT key,
+    // so the only thing standing between the user and their data is the sidecar.
+    inChild(home, sidecar, `
+        const mgr = new ApiManager(configFile);
+        return { loadError: mgr.loadError };
+    `);
+    const healthy = fs.readFileSync(cfg, 'utf8');
+    fs.writeFileSync(sidecar, '{ "v": 9, "source": "ioreg", "id": "from-the-future" }');
+
+    const run = runLauncher(home, sidecar, '');
+    const out = stripAnsi(run.stdout);
+    assert.strictEqual(run.status, 0, `stderr: ${(run.stderr || '').slice(0, 300)}`);
+
+    assert.ok(out.includes(sidecar),
+        `the message must name the file that is actually broken:\n${out.slice(-900)}`);
+    assert.ok(/do not delete|don't delete|intact/i.test(out),
+        'and must say the config file itself is probably fine');
+    assert.ok(!/set it aside|start fresh/i.test(out),
+        'quarantine must not be advertised: without a key we cannot tell an ' +
+        'unreadable config from a perfectly good one');
+
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), healthy, 'and nothing may be touched');
+});
+
+test('B1: quarantine stays disabled while key material is unusable', () => {
+    const home = makeHome('keymat-block');
+    const sidecar = path.join(home, 'machine-key.json');
+    const { cfg } = seedUnreadableHome(home);
+    fs.writeFileSync(sidecar, '{ "v": 9, "source": "ioreg", "id": "from-the-future" }');
+    const before = fs.readFileSync(cfg, 'utf8');
+
+    const main = runLauncher(home, sidecar, '');
+    const apiEntry = menuEntries(main.stdout).find(e => /API Management/i.test(e.label));
+    const menu = runLauncher(home, sidecar, `${apiEntry.index}\n`);
+    const labels = menuEntries(menu.stdout).map(e => e.label);
+    assert.ok(!labels.some(l => /set the unreadable config aside/i.test(l)),
+        `the quarantine action must not be offered:\n${labels.join('\n')}`);
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), before);
+});
+
+console.log('\n=== M3.1: a degraded identity must never migrate the key generation ===\n');
+
+test('M3.1: an unpinned identity blocks the key-generation heal', () => {
+    // When the identity could not be pinned, it is the drifting hostname. Using
+    // it to RE-ENCRYPT is installing the very bug this release removes: the new
+    // ciphertext would be keyed to a name that changes with the next network.
+    const home = makeHome('unpinned');
+    const unwritableSidecar = path.join(home, 'no-such-dir', 'machine-key.json');
+    const { cfg, bytes } = seedUnreadableHome(home);
+
+    const result = inChild(home, unwritableSidecar, `
+        const os = require('os');
+        os.hostname = () => 'faraway-77';
+        crypto.resetKeyCachesForTests();
+        const machineKey = require(${JSON.stringify(path.join(REPO, 'lib', 'machine-key'))});
+        const identity = machineKey.getStableIdentity();
+        const mgr = new ApiManager(configFile);
+        return {
+            pinned: identity.pinned,
+            source: identity.source,
+            loadError: mgr.loadError,
+            keyStale: mgr.keyStale,
+            keyHealOutcome: mgr.keyHealOutcome,
+            apis: mgr.getApis().length,
+        };
+    `);
+
+    assert.strictEqual(result.pinned, false, 'precondition: the identity could not be pinned');
+    assert.strictEqual(result.source, 'hostname');
+    assert.strictEqual(result.loadError, null, 'the config must still be readable');
+    assert.strictEqual(result.apis, 1, 'and usable');
+    assert.strictEqual(result.keyHealOutcome, 'skipped:identity-unpinned',
+        'but it must NOT be re-encrypted under a key that is still drifting');
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), bytes,
+        'the file must be byte-identical — no migration happened');
+});
+
 console.log('\n=== E3b: quarantine and restore against real files ===\n');
 
 test('E3b: quarantine sets every generation aside and leaves the launcher usable', () => {
