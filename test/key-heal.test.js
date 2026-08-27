@@ -47,6 +47,9 @@ const { decrypt, resetKeyCachesForTests } = require(path.join(REPO, 'lib', 'cryp
 
 const realHostname = os.hostname;
 
+/** Plaintext of a pre-GCM (CBC-era) token used by the BL-1 fixtures. */
+const TOKEN_CBC_REAL = 'sk-cbc-era-real-token-0007';
+
 function sleepSync(ms) {
     const sab = new SharedArrayBuffer(4);
     Atomics.wait(new Int32Array(sab), 0, 0, ms);
@@ -133,7 +136,12 @@ function seedDriftedWorkspace(label, opts) {
         const config = JSON.parse(decrypt(fs.readFileSync(filePath, 'utf8')).value);
         const plaintexts = config.apis.map(api => gcmOpen(api.authToken, stableKey(sidecar)));
         config.apis.forEach((api, i) => {
-            api.authToken = gcmWithKey(plaintexts[i], tokenKeys[i] || tokenKeys[0]);
+            // rawTokens lets a test plant a payload verbatim (a CBC-era token,
+            // a plaintext token, ...) instead of a GCM re-encryption.
+            const raw = options.rawTokens && options.rawTokens[i];
+            api.authToken = raw !== undefined && raw !== null
+                ? raw
+                : gcmWithKey(plaintexts[i], tokenKeys[i] || tokenKeys[0]);
         });
         const bytes = gcmWithKey(JSON.stringify(config, null, 2), outerKey);
         fs.writeFileSync(filePath, bytes);
@@ -318,6 +326,112 @@ test('R10: heal is skipped entirely when key material is in the fail-closed stat
         os.hostname = realHostname;
         resetKeyCachesForTests();
     }
+});
+
+console.log('\n=== BL-1: CBC garbage must never be re-encrypted over a real token ===\n');
+
+/**
+ * A real padding-luck CBC payload: encrypted under `writtenUnder`'s 10000-era
+ * key, but chosen so that decrypting it with `openedUnder`'s key passes the
+ * PKCS#7 padding check and yields garbage. CBC is unauthenticated, so roughly
+ * 1 in 255 payloads does this — the search below finds one in a few hundred
+ * tries. This is the input that turns a recoverable token into a destroyed one
+ * if the heal ever trusts an unauthenticated decryption.
+ */
+function paddingLuckCbcToken(plaintext, writtenUnder, openedUnder) {
+    const writeKey = hostnameEraKey(writtenUnder, 10000);
+    const readKey = hostnameEraKey(openedUnder, 10000);
+    for (let attempt = 0; attempt < 40000; attempt++) {
+        const iv = nodeCrypto.randomBytes(16);
+        const cipher = nodeCrypto.createCipheriv('aes-256-cbc', writeKey, iv);
+        let ct = cipher.update(plaintext, 'utf8', 'hex');
+        ct += cipher.final('hex');
+        const payload = iv.toString('hex') + ':' + ct;
+        try {
+            const d = nodeCrypto.createDecipheriv('aes-256-cbc', readKey, iv);
+            let garbage = d.update(ct, 'hex', 'utf8');
+            garbage += d.final('utf8'); // throws unless padding coincidentally validates
+            return { payload, garbage, attempts: attempt + 1 };
+        } catch (_) { /* keep searching */ }
+    }
+    throw new Error('could not find a padding-luck CBC sample');
+}
+
+test('BL-1: a padding-luck CBC token is NOT accepted as recovered plaintext', () => {
+    const luck = paddingLuckCbcToken(TOKEN_CBC_REAL, 'fixedhost-2', 'fixedhost-3');
+    const ws = seedDriftedWorkspace('bl1', { rawTokens: [null, luck.payload] });
+
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.strictEqual(mgr.loadError, null);
+    const names = mgr.keyRecoveryReport.unrecoverable.map(u => u.apiName);
+    assert.deepStrictEqual(names, ['Beta'],
+        `an unauthenticated wrong-key decryption must be rejected, not reported as recovered ` +
+        `(found in ${luck.attempts} tries; garbage was ${JSON.stringify(luck.garbage.slice(0, 24))})`);
+});
+
+test('BL-1: the real CBC ciphertext survives the heal byte-for-byte', () => {
+    const luck = paddingLuckCbcToken(TOKEN_CBC_REAL, 'fixedhost-2', 'fixedhost-3');
+    const ws = seedDriftedWorkspace('bl1b', { rawTokens: [null, luck.payload] });
+
+    loadUnderHostname(ws.configFile, 'fixedhost-3');
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.config.apis[1].authToken, luck.payload,
+        'the token must not be replaced by an encryption of the garbage plaintext');
+
+    // And whoever still holds the original key gets the REAL token back.
+    const parts = luck.payload.split(':');
+    const d = nodeCrypto.createDecipheriv('aes-256-cbc',
+        hostnameEraKey('fixedhost-2', 10000), Buffer.from(parts[0], 'hex'));
+    let real = d.update(parts[1], 'hex', 'utf8');
+    real += d.final('utf8');
+    assert.strictEqual(real, TOKEN_CBC_REAL, 'the real token is still recoverable from the ciphertext');
+});
+
+test('BL-1: a CBC token that opens under the CURRENT hostname is still healed', () => {
+    // The legitimate case must keep working: a genuine pre-GCM token whose key
+    // is the current hostname's legacy key gets upgraded to GCM + stable key.
+    const legacyKey = hostnameEraKey(os.hostname(), 10000);
+    const iv = nodeCrypto.randomBytes(16);
+    const cipher = nodeCrypto.createCipheriv('aes-256-cbc', legacyKey, iv);
+    let ct = cipher.update(TOKEN_CBC_REAL, 'utf8', 'hex');
+    ct += cipher.final('hex');
+    const cbcToken = iv.toString('hex') + ':' + ct;
+
+    // The blob must be openable under the real hostname, so the outer layer is
+    // written with the current hostname's era key rather than a drifted one.
+    const ws = seedDriftedWorkspace('bl1c', {
+        outerKey: hostnameEraKey(os.hostname(), 600000),
+        rawTokens: [null, cbcToken],
+    });
+    const mgr = new ApiManager(ws.configFile); // real hostname, no drift stub
+    assert.strictEqual(mgr.keyRecoveryReport.unrecoverable.length, 0,
+        'a CBC token under the current hostname key must be recoverable');
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    const dec = decrypt(reopened.config.apis[1].authToken);
+    assert.ok(dec.success, `the upgraded token must open with the current key: ${dec.error}`);
+    assert.strictEqual(dec.value, TOKEN_CBC_REAL);
+    assert.strictEqual(reopened.config.apis[1].authToken.split(':').length, 3,
+        'the upgraded token must be GCM (3 segments)');
+});
+
+test('S-9c: a non-cipher-shaped token is left alone, not reported as unrecoverable', () => {
+    // Plaintext tokens exist in test/legacy configs (lib/launcher.js:352 has a
+    // shape guard for exactly this). They are not a key-generation problem, and
+    // re-encrypting something we cannot verify is not our call to make.
+    const ws = seedDriftedWorkspace('s9c', { rawTokens: [null, 'sk-plaintext-token-value'] });
+    const mgr = loadUnderHostname(ws.configFile, 'fixedhost-3');
+    assert.deepStrictEqual(mgr.keyRecoveryReport.unrecoverable, [],
+        'a token that was never encrypted is not an unrecoverable key generation');
+    assert.strictEqual(mgr.keyRecoveryReport.notEncrypted, 1,
+        'it must still be counted, so the report is not silently lossy');
+
+    resetKeyCachesForTests();
+    const reopened = new ApiManager(ws.configFile);
+    assert.strictEqual(reopened.config.apis[1].authToken, 'sk-plaintext-token-value',
+        'it must be preserved verbatim');
 });
 
 console.log('\n=== R13/B6: the heal write must not cripple a second instance ===\n');
