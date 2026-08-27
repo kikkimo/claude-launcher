@@ -21,6 +21,7 @@ const fs = require('fs');
 const nodeCrypto = require('crypto');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 let passed = 0;
 let failed = 0;
@@ -101,6 +102,22 @@ function loadUnder(configFile, hostname) {
     }
 }
 
+/**
+ * Run fn() with os.hostname() stubbed. Anything that consults the candidate
+ * set — listQuarantined(), restoreQuarantined() — has to run INSIDE this, not
+ * merely be constructed inside it.
+ */
+function underHostname(hostname, fn) {
+    os.hostname = () => hostname;
+    resetKeyCachesForTests();
+    try {
+        return fn();
+    } finally {
+        os.hostname = realHostname;
+        resetKeyCachesForTests();
+    }
+}
+
 /** Every file in the workspace directory, for exact before/after comparison. */
 function snapshotDir(dir) {
     const out = {};
@@ -178,19 +195,31 @@ test('R11: quarantine is refused while another instance holds the write lock', (
 });
 
 test('R11: a partial failure rolls back completely and keeps the block', () => {
+    if (process.platform !== 'darwin') {
+        // Needs a real per-file immutability flag; chattr +i is root-only on
+        // Linux and there is no equivalent to reach from here on Windows.
+        // Stated limitation, not silent coverage.
+        console.log('    (skipped: needs chflags, darwin only)');
+        return;
+    }
     const ws = seedUnreadable('partial');
     const mgr = loadUnder(ws.configFile, 'runtime-1');
-    // Occupy the .bak2 target so its move must fail after main and .bak moved.
-    fs.mkdirSync(`${ws.configFile}.bak2.unreadable.1`);
-    fs.writeFileSync(path.join(`${ws.configFile}.bak2.unreadable.1`, 'blocker'), 'x');
+    // Make the LAST generation genuinely immovable, so the failure happens
+    // after main and .bak have already moved — the partial state that would
+    // otherwise become writable and get rotated into oblivion.
+    execFileSync('chflags', ['uchg', ws.configFile + '.bak2']);
     const before = snapshotDir(ws.dir);
-
-    const result = mgr.quarantineUnreadableConfig();
-    assert.strictEqual(result.ok, false, 'an all-or-nothing operation must report failure');
-    assert.deepStrictEqual(snapshotDir(ws.dir), before,
-        'every generation must be back where it started');
-    assert.ok(mgr.loadError, 'the block must remain — a half-quarantined state must not be writable');
-    assert.strictEqual(mgr.saveConfig(), false);
+    try {
+        const result = mgr.quarantineUnreadableConfig();
+        assert.strictEqual(result.ok, false, 'an all-or-nothing operation must report failure');
+        assert.strictEqual(result.reason, 'partial');
+        assert.deepStrictEqual(snapshotDir(ws.dir), before,
+            'every generation must be back where it started');
+        assert.ok(mgr.loadError, 'the block must remain — a half-quarantined state must not be writable');
+        assert.strictEqual(mgr.saveConfig(), false);
+    } finally {
+        execFileSync('chflags', ['nouchg', ws.configFile + '.bak2']);
+    }
 });
 
 test('R11: quarantine is refused when key material is unusable', () => {
@@ -242,13 +271,14 @@ test('R12: a quarantined config is restored once its key becomes reachable again
     assert.strictEqual(back.loadError, null);
     assert.strictEqual(back.config.apis.length, 1, 'precondition: main is valid and small');
 
-    const candidates = back.listQuarantined();
-    assert.strictEqual(candidates.length, 1, `expected one quarantined set, got ${JSON.stringify(candidates)}`);
-    assert.strictEqual(candidates[0].readable, true,
-        'the old ciphertext must be recognised as readable again');
-    assert.deepStrictEqual(candidates[0].apiNames, ['Alpha', 'Beta']);
-
-    const result = back.restoreQuarantined(candidates[0].index);
+    const result = underHostname('homehost-3', () => {
+        const candidates = back.listQuarantined();
+        assert.strictEqual(candidates.length, 1, `expected one quarantined set, got ${JSON.stringify(candidates)}`);
+        assert.strictEqual(candidates[0].readable, true,
+            'the old ciphertext must be recognised as readable again');
+        assert.deepStrictEqual(candidates[0].apiNames, ['Alpha', 'Beta']);
+        return back.restoreQuarantined(candidates[0].index);
+    });
     assert.strictEqual(result.ok, true, `restore failed: ${JSON.stringify(result)}`);
     assert.deepStrictEqual(back.config.apis.map(a => a.name), ['Alpha', 'Beta'],
         'the restored config must be live in memory, not just on disk');
@@ -269,9 +299,16 @@ test('R12: restoring preserves the config that was live at the time', () => {
     const displaced = fs.readFileSync(ws.configFile, 'utf8');
 
     const back = loadUnder(ws.configFile, 'homehost-3');
-    assert.strictEqual(back.restoreQuarantined(1).ok, true);
+    assert.strictEqual(underHostname('homehost-3', () => back.restoreQuarantined(1)).ok, true);
 
-    assert.strictEqual(fs.readFileSync(ws.configFile + '.bak', 'utf8'), displaced,
+    // It lands in .bak, then the key-generation heal that follows the restore
+    // rotates it once more — so assert on the property that matters (it still
+    // exists in a backup generation) rather than on which slot it occupies.
+    const generations = ['.bak', '.bak2']
+        .map(suffix => ws.configFile + suffix)
+        .filter(p => fs.existsSync(p))
+        .map(p => fs.readFileSync(p, 'utf8'));
+    assert.ok(generations.includes(displaced),
         'the displaced config must survive as a backup generation, not be overwritten');
     assert.ok(fs.existsSync(ws.configFile + '.unreadable.1'),
         'and the quarantine record itself must stay on disk');
@@ -283,13 +320,14 @@ test('R12: an unreadable quarantine set is reported, not restored', () => {
     mgr.quarantineUnreadableConfig();
 
     const back = loadUnder(ws.configFile, 'runtime-1');
-    const candidates = back.listQuarantined();
-    assert.strictEqual(candidates.length, 1);
-    assert.strictEqual(candidates[0].readable, false,
-        'a set we still cannot open must not claim to be restorable');
-
     const before = snapshotDir(ws.dir);
-    const result = back.restoreQuarantined(1);
+    const result = underHostname('runtime-1', () => {
+        const candidates = back.listQuarantined();
+        assert.strictEqual(candidates.length, 1);
+        assert.strictEqual(candidates[0].readable, false,
+            'a set we still cannot open must not claim to be restorable');
+        return back.restoreQuarantined(1);
+    });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'unreadable');
     assert.deepStrictEqual(snapshotDir(ws.dir), before, 'a failed restore must move nothing');

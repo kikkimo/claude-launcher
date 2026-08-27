@@ -27,6 +27,7 @@ const FILES = [
     'machine-key.test.js',
     'crypto.test.js',
     'key-heal.test.js',
+    'quarantine.test.js',
     'api-manager.test.js',
     'edit-api.test.js',
     'password-guard.test.js',
