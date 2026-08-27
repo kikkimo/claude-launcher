@@ -98,8 +98,9 @@ function hostnameStub(name) {
     return file;
 }
 
-function runLauncher(home, sidecar, input, hostname) {
-    const env = { HOME: home, TERM: 'xterm-256color', CLAUDE_LAUNCHER_KEY_FILE: sidecar };
+function runLauncher(home, sidecar, input, hostname, extraEnv) {
+    const env = Object.assign(
+        { HOME: home, TERM: 'xterm-256color', CLAUDE_LAUNCHER_KEY_FILE: sidecar }, extraEnv || {});
     if (hostname) env.NODE_OPTIONS = `--require ${hostnameStub(hostname)}`;
     return spawnSync(process.execPath, [path.join(REPO, 'claude-launcher')], {
         cwd: REPO,
@@ -327,12 +328,15 @@ test('BL-4: a broken sidecar must not silently roll the config back a generation
     // is genuinely reachable by the candidate sweep — which is the whole
     // premise of this bug. With the real hostname it would be unreachable and
     // the promotion branch would never even be tried.
-    const run = runLauncher(home, sidecar, '', 'faraway-78');
+    // The probe must be unavailable too, otherwise the candidate sweep simply
+    // recovers main from the machine identity and this scenario cannot arise —
+    // see the test below, which pins that (better) outcome separately.
+    const run = runLauncher(home, sidecar, '', 'faraway-78', { PATH: '/nonexistent-bin' });
     assert.strictEqual(run.status, 0);
     const out = stripAnsi(run.stdout);
     assert.ok(!/recovered automatically from backup/i.test(out),
         `a global key failure must not be reported as a recovered backup:\n${out.slice(-700)}`);
-    assert.ok(out.includes(sidecar), 'the real cause must be named');
+    assert.ok(out.includes(sidecar), `the real cause must be named:\n${out.slice(0,1400)}\nSTDERR:${(run.stderr||'').slice(0,600)}`);
     assert.strictEqual(fs.readFileSync(cfg, 'utf8'), mainBefore,
         'and the newest generation must be untouched');
 
@@ -346,6 +350,36 @@ test('BL-4: a broken sidecar must not silently roll the config back a generation
     assert.deepStrictEqual(after.names, ['RenamedAfterHeal'],
         'the edit made after the heal must survive — this is the data the old ' +
         'behaviour destroyed while reporting success');
+});
+
+test('M-2(a): a broken sidecar no longer blocks a config the machine can still identify', () => {
+    // The other half of putting the probe result in the candidate set: the
+    // identity behind the ciphertext is still derivable from this machine, so
+    // losing the sidecar costs a sweep, not the data. Saving stays refused —
+    // fail-closed — and the banner says so instead of leaving the user to
+    // discover it when an edit fails.
+    const home = makeHome('m2a');
+    const sidecar = path.join(home, 'machine-key.json');
+    const cfg = path.join(home, '.claude-launcher-apis.json');
+    seedUnreadableHome(home);
+    inChild(home, sidecar, `
+        const os = require('os');
+        os.hostname = () => 'faraway-77';
+        crypto.resetKeyCachesForTests();
+        const mgr = new ApiManager(configFile);
+        return { healed: mgr.keyHealOutcome };
+    `);
+    const healthy = fs.readFileSync(cfg, 'utf8');
+    fs.writeFileSync(sidecar, JSON.stringify({ v: 9, source: 'ioreg', id: 'from-the-future' }));
+
+    const run = runLauncher(home, sidecar, '');
+    const out = stripAnsi(run.stdout);
+    assert.strictEqual(run.status, 0);
+    assert.ok(!/API config file is unreadable/i.test(out),
+        `the config must still open:\n${out.slice(0, 900)}`);
+    assert.ok(/key material/i.test(out),
+        'but the degraded key material must be reported, since saving is refused');
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), healthy, 'and nothing may be rewritten');
 });
 
 console.log('\n=== M3.1: a degraded identity must never migrate the key generation ===\n');

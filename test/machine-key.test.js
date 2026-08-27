@@ -258,11 +258,11 @@ test('S-6: a TIMED-OUT probe uses the hostname identity but does NOT pin it', ()
 test('S-6: probe reports a timeout distinguishably from a definite failure', () => {
     const timeout = Object.assign(new Error('spawnSync ioreg ETIMEDOUT'),
         { code: 'ETIMEDOUT', killed: true, signal: 'SIGTERM' });
-    const result = machineKey.probe('darwin', io({ exec: { ioreg: timeout } }));
+    const result = machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': timeout } }));
     assert.ok(result && result.timedOut === true,
         `a timeout must be reported as such, got ${JSON.stringify(result)}`);
-    // And a plain missing binary must stay a definite failure.
-    assert.strictEqual(machineKey.probe('darwin', io({})), null);
+    // Output we could read but not use stays a definite failure.
+    assert.strictEqual(machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': IOREG_NO_UUID } })), null);
 });
 
 test('M-2(a): probes use absolute paths, so a stripped PATH is not "no such machine id"', () => {
@@ -350,18 +350,22 @@ test('S-5: inspecting still fails closed on a corrupt sidecar', () => {
 console.log('\n=== machine-key: platform probing (R3, B12) ===\n');
 
 test('R3 darwin: IOPlatformUUID is extracted from real ioreg output', () => {
-    const result = machineKey.probe('darwin', io({ exec: { ioreg: IOREG_REAL } }));
+    const result = machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': IOREG_REAL } }));
     assert.ok(result, 'probe must succeed');
     assert.strictEqual(result.source, 'ioreg');
     assert.strictEqual(result.id, 'A0C5A880-EE6D-582D-8836-9C77080D904A');
 });
 
 test('R3 darwin: ioreg output without a UUID probes as failure', () => {
-    assert.strictEqual(machineKey.probe('darwin', io({ exec: { ioreg: IOREG_NO_UUID } })), null);
+    assert.strictEqual(machineKey.probe('darwin', io({ exec: { '/usr/sbin/ioreg': IOREG_NO_UUID } })), null);
 });
 
-test('R3 darwin: a throwing/missing ioreg probes as failure', () => {
-    assert.strictEqual(machineKey.probe('darwin', io({})), null);
+test('R3 darwin: a missing ioreg is retryable, not a verdict (M-2(a))', () => {
+    // The stub throws ENOENT, which is what a stripped PATH looks like. Since
+    // M-2(a) that means "could not ask", so the identity must stay unpinned and
+    // the next launch tries again.
+    const result = machineKey.probe('darwin', io({}));
+    assert.ok(result && result.timedOut === true, JSON.stringify(result));
 });
 
 test('R3 linux: /etc/machine-id is used when valid', () => {
@@ -415,7 +419,7 @@ test('R3: an unknown platform probes as failure', () => {
 });
 
 test('B12: probes run with hardened exec options (stderr ignored, timeout, windowsHide, maxBuffer)', () => {
-    const stub = io({ exec: { ioreg: IOREG_REAL } });
+    const stub = io({ exec: { '/usr/sbin/ioreg': IOREG_REAL } });
     machineKey.probe('darwin', stub);
     assert.strictEqual(stub.calls.length, 1);
     const opts = stub.calls[0].opts || {};

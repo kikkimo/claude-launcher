@@ -477,6 +477,41 @@ test('A2: candidate keys are derived once per process, not per payload', () => {
     });
 });
 
+test('M-2(a): the sweep reaches data written under the probed identity', () => {
+    // The one-way door: ciphertext written under the machine's probed identity,
+    // then the sidecar is lost and probing later fails, so the runtime identity
+    // is the hostname. Hostname families alone can never reach that key.
+    const machineKey = require('../lib/machine-key');
+    const probed = machineKey.probe(process.platform);
+    if (!probed || !probed.id) {
+        console.log('    (skipped: no probeable identity on this platform)');
+        return;
+    }
+    const probedKey = pbkdf2(probed.id + os.userInfo().username + os.platform(), 600000);
+    const payload = gcmWithKey('{"apis":[]}', probedKey);
+
+    // Pin a HOSTNAME identity, which is the state this scenario needs: the
+    // sidecar that recorded the probed identity is gone, and the runtime
+    // identity has fallen back to the name.
+    const sidecar = process.env.CLAUDE_LAUNCHER_KEY_FILE;
+    const original = fs.existsSync(sidecar) ? fs.readFileSync(sidecar, 'utf8') : null;
+    try {
+        fs.writeFileSync(sidecar,
+            JSON.stringify({ v: 1, source: 'hostname', id: 'some-unrelated-host-9' }));
+        withHostname('some-unrelated-host-9', () => {
+            assert.strictEqual(decrypt(payload).success, false,
+                'precondition: the hot path cannot open it');
+            const recovered = decryptWithRecovery(payload);
+            assert.ok(recovered.success,
+                'a probeable identity must be recoverable, not only hostnames');
+            assert.strictEqual(recovered.value, '{"apis":[]}');
+        });
+    } finally {
+        if (original !== null) fs.writeFileSync(sidecar, original);
+        resetKeyCachesForTests();
+    }
+});
+
 console.log('\n--- R8/B2: 2-segment CBC must never see candidates or registered keys ---\n');
 
 test('R8: CBC is NEVER candidate-swept (a wrong key would decrypt to garbage ~1/255 of the time)', () => {

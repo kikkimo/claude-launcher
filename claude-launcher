@@ -2010,6 +2010,12 @@ async function showMenu() {
             'warnings.config_unreadable_key_material',
             require('./lib/machine-key').sidecarPath(),
             apiManager.keyMaterialError) + colors.reset);
+    } else if (apiManager.keyMaterialError) {
+        // Reachable since the candidate sweep gained the probe result: the
+        // config opens fine, but every save is refused. Saying so up front
+        // beats letting the user discover it when an edit fails.
+        healthLines.push(colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.key_material_degraded', apiManager.keyMaterialError) + colors.reset);
     } else if (apiManager.loadError) {
         healthLines.push(colors.bright + colors.red + '  ⚠️  ' +
             i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset);
