@@ -17,7 +17,7 @@
  * developer's machine without sudo and a real system mutation.
  */
 
-require('./helpers/isolate-key-material');
+const { childEnv } = require('./helpers/isolate-key-material');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -593,7 +593,7 @@ fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
 
     const child = spawn(process.execPath, [childScript], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: Object.assign({}, process.env, { CLAUDE_LAUNCHER_KEY_FILE: ws.sidecar }),
+        env: childEnv({ CLAUDE_LAUNCHER_KEY_FILE: ws.sidecar }),
     });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });

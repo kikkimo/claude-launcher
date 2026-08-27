@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **macOS: API Config Became Unreadable After a Network Change** (`⚠️ API config file is unreadable and was NOT overwritten`): the encryption key was derived from `os.hostname()`. When `scutil --get HostName` is unset — the default on many Macs — `gethostname()` falls back to the DHCP/mDNS name, which changes with the network, with a DHCP renewal, or when Bonjour appends a dedup counter (`-2`/`-3`/`-4`). Every such change silently rotated the key, and the PR #14 hardening then classified "wrong key" as "corrupt file", refused to save, and blocked API management — turning a recoverable state into a permanent one. Windows was unaffected because `COMPUTERNAME` is stable, which is why this looked macOS-only.
+
+  New ciphertext derives from a machine identity pinned once in `~/.claude-launcher-machine.json` (0600): `IOPlatformUUID` on macOS, `/etc/machine-id` on Linux, `MachineGuid` on Windows, with the hostname as a deterministic last resort. Existing configs are recovered on load by trying a bounded, ordered set of historical hostname keys and are then re-encrypted under the pinned identity, after the pre-migration ciphertext is copied to `<config>.pre-key-migration` (0600, never rotated). The cipher itself is unchanged — AES-256-GCM, PBKDF2-SHA256 at 600000 iterations — so no on-disk format migration is involved.
+
+### Upgrade notes
+- **Back up `~/.claude-launcher-machine.json` together with your config.** It holds the machine identity your tokens are encrypted under. If it is lost it can normally be re-derived by probing this machine again, so deleting it is not fatal — but a config restored onto a *different* machine still needs `export`/`import`, exactly as before.
+- **Do not open the same config with an older release after upgrading.** The old version cannot read the re-encrypted main file, falls back to `.bak`, and promotes that older generation over it — silently discarding your most recent change.
+- **Known limitation: tokens from the pre-3.3.0 CBC era are not recovered on a machine whose hostname has already drifted.** AES-256-CBC is unauthenticated, so a wrong key "succeeds" with garbage for roughly 1 in 255 payloads; guessing across historical hostnames could therefore return plausible nonsense, which the migration would then re-encrypt over the real token. Such a token is reported as unrecoverable and its ciphertext is preserved byte-for-byte instead. Affected entries need their token pasted in again. Tokens whose key is the *current* hostname still upgrade normally.
+- **Known limitation: one hostname shape cannot be recovered by enumeration.** If the ciphertext was written under a DHCP-assigned name whose base differs from every readable source (e.g. a `MBP`-style abbreviation that appears in neither `LocalHostName` nor `ComputerName`), no candidate list can reconstruct it. Nothing is destroyed in that case — the config and all three backup generations are left untouched.
+
 ## [3.3.1] - 2026-08-17
 
 ### Fixed

@@ -22,7 +22,7 @@
  * NODE_OPTIONS path stays ASCII and space-free.
  */
 
-require('./helpers/isolate-key-material');
+const { childEnv } = require('./helpers/isolate-key-material');
 
 const assert = require('assert');
 const { execFileSync, spawnSync } = require('child_process');
@@ -103,12 +103,21 @@ function independentProbe() {
 
 // --- child process harness -------------------------------------------------
 
-/** A `--require` preload that pins os.hostname() inside the child. */
+/**
+ * A `--require` preload that pins os.hostname() inside the child.
+ * Written under os.tmpdir() (this repo's own path contains non-ASCII) and
+ * memoized per name, so repeated launches do not leak a directory each.
+ */
+const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-hoststub-'));
+const stubCache = new Map();
 function hostnameStub(name) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-hoststub-'));
-    const file = path.join(dir, `hostname-${name}.js`);
-    fs.writeFileSync(file, `const os = require('os'); os.hostname = () => ${JSON.stringify(name)};\n`);
-    assert.ok(!/\s/.test(file), 'NODE_OPTIONS cannot carry a path with spaces');
+    let file = stubCache.get(name);
+    if (file === undefined) {
+        file = path.join(stubDir, `hostname-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.js`);
+        fs.writeFileSync(file, `const os = require('os'); os.hostname = () => ${JSON.stringify(name)};\n`);
+        assert.ok(!/\s/.test(file), 'NODE_OPTIONS cannot carry a path with spaces');
+        stubCache.set(name, file);
+    }
     return file;
 }
 
@@ -119,7 +128,9 @@ function runLauncher({ home, hostname, sidecar, timeoutMs = 20000 }) {
         encoding: 'utf8',
         timeout: timeoutMs,
         input: '',
-        env: Object.assign({}, process.env, {
+        // childEnv() is the single source of the isolation contract; the
+        // per-test overrides are applied on top of it.
+        env: childEnv({
             HOME: home,
             TERM: 'xterm-256color',
             CLAUDE_LAUNCHER_KEY_FILE: sidecar,
@@ -248,6 +259,21 @@ test('E2 (positive): the sidecar is created and pins an independently probed mac
         'the pinned id must be the real platform machine id, not a placeholder or constant');
     assert.notStrictEqual(doc.id, 'fixedhost-3', 'the identity must not be the hostname');
     assert.notStrictEqual(doc.id, os.hostname());
+});
+
+test('S-5: a launcher run with nothing to decrypt pins nothing and probes nothing', () => {
+    // The launcher builds an ApiManager at module load, so a health check that
+    // probed would fork ioreg on every start — including for a brand-new user
+    // who only wanted to see the menu — and would pin an identity before there
+    // is anything to protect.
+    const home = makeHome('s5');
+    const sidecar = path.join(home, 'machine-key.json');
+    const run = runLauncher({ home, hostname: 'fixedhost-3', sidecar });
+    assert.strictEqual(run.status, 0, `stderr: ${(run.stderr || '').slice(0, 300)}`);
+    assert.strictEqual(fs.existsSync(sidecar), false,
+        'no config means no key is needed, so nothing may be pinned yet');
+    assert.strictEqual(fs.existsSync(path.join(home, '.claude-launcher-apis.json')), false,
+        'and no config may be created either');
 });
 
 test('E2 (negative): swapping the pinned id makes the same ciphertext unreadable', () => {
