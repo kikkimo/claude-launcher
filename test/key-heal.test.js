@@ -437,14 +437,21 @@ test('S-9c: a non-cipher-shaped token is left alone, not reported as unrecoverab
 console.log('\n=== R13/B6: the heal write must not cripple a second instance ===\n');
 
 test('R13: a CAS conflict during heal is reconciled, not turned into a read-only instance', () => {
-    // Fully real two-writer race, made deterministic with the existing write
-    // lock: the child loads the drifted config, then blocks acquiring the
-    // lock; meanwhile this process publishes an already-healed file and
-    // releases the lock. The child's heal therefore hits a genuine CAS
-    // mismatch and must reconcile instead of latching saveConflict forever.
+    // A real two-writer race, made STRICTLY deterministic rather than
+    // time-based. The child subclasses ApiManager purely to place a barrier
+    // around _readDiskState: it calls the real method, keeps the real value,
+    // and only adds "announce that the CAS baseline is captured, then wait for
+    // the other writer to publish". Nothing is faked — the child then runs the
+    // real load, heal, lock, CAS and reconcile paths against real files.
+    //
+    // The earlier version of this test used a 100ms sleep instead, which was
+    // shorter than the child's node startup plus candidate PBKDF2. The parent
+    // published BEFORE the child read its baseline, so the child loaded an
+    // already-healed config, no conflict occurred, and every assertion below
+    // still passed. Hence the positive keyHealOutcome assertion.
     const ws = seedDriftedWorkspace('r13');
-    const lockPath = ws.configFile + '.lock';
     const resultPath = path.join(ws.dir, 'child-result.json');
+    const goPath = path.join(ws.dir, 'child-go');
 
     // What the "other instance" will have published: the same config, healed.
     const healedBytes = (() => {
@@ -463,12 +470,34 @@ const fs = require('fs');
 const os = require('os');
 os.hostname = () => 'fixedhost-3';
 const ApiManager = require(${JSON.stringify(path.join(REPO, 'lib', 'api-manager'))});
-// Warm every key cache first, so the load that follows the readiness signal is
-// fast and the parent's publish cannot slip in before the baseline read.
-const crypto = require(${JSON.stringify(path.join(REPO, 'lib', 'crypto'))});
-crypto.decryptWithRecovery(fs.readFileSync(${JSON.stringify(ws.configFile)}, 'utf8'));
-fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
-const mgr = new ApiManager(${JSON.stringify(ws.configFile)});
+
+function sleepSync(ms) {
+    const sab = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(sab), 0, 0, ms);
+}
+
+/**
+ * Ordering barrier only. _readDiskState is where the CAS baseline is captured,
+ * immediately after loadConfig() and before the heal's save. Announcing there —
+ * and only there, on the first call — pins the interleaving exactly:
+ *   child loads (drifted) -> child captures baseline -> READY
+ *   -> parent publishes the healed file -> GO
+ *   -> child's heal saves -> CAS mismatch is guaranteed
+ * The real method's real return value is used unchanged.
+ */
+class CoordinatedApiManager extends ApiManager {
+    _readDiskState() {
+        const bytes = super._readDiskState();
+        if (!this.__announced) {
+            this.__announced = true;
+            fs.writeFileSync(${JSON.stringify(readyPath)}, 'baseline-captured');
+            while (!fs.existsSync(${JSON.stringify(goPath)})) sleepSync(5);
+        }
+        return bytes;
+    }
+}
+
+const mgr = new CoordinatedApiManager(${JSON.stringify(ws.configFile)});
 let secondSaveOk = null;
 try {
     mgr.config.apis[0].name = 'RenamedByChild';
@@ -477,6 +506,7 @@ try {
     secondSaveOk = 'threw: ' + e.message;
 }
 fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
+    keyHealOutcome: mgr.keyHealOutcome,
     loadError: mgr.loadError,
     apiCount: mgr.config.apis.length,
     saveConflict: mgr.saveConflict,
@@ -485,8 +515,6 @@ fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
 }));
 `);
 
-    // Hold the lock so the child cannot write yet.
-    fs.writeFileSync(lockPath, 'held-by-test');
     const child = spawn(process.execPath, [childScript], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: Object.assign({}, process.env, { CLAUDE_LAUNCHER_KEY_FILE: ws.sidecar }),
@@ -494,18 +522,15 @@ fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
 
-    // Wait for the child to signal that its CAS baseline is captured and it is
-    // now blocked acquiring the write lock. Without this handshake the parent's
-    // publish could land BEFORE the child's baseline read, in which case the
-    // child simply loads an already-healed config and there is no conflict at
-    // all — which is exactly how the earlier time-based version of this test
-    // passed vacuously.
+    // Wait until the child has loaded the drifted config AND captured it as its
+    // CAS baseline. Only then is publishing guaranteed to land in the conflict
+    // window rather than before the child ever read the file.
     let waited = 0;
-    while (!fs.existsSync(readyPath) && waited < 20000) { sleepSync(10); waited += 10; }
-    assert.ok(fs.existsSync(readyPath), `child never signalled readiness. stderr:\n${stderr}`);
+    while (!fs.existsSync(readyPath) && waited < 30000) { sleepSync(10); waited += 10; }
+    assert.ok(fs.existsSync(readyPath), `child never captured its baseline. stderr:\n${stderr}`);
 
     fs.writeFileSync(ws.configFile, healedBytes);
-    fs.unlinkSync(lockPath);
+    fs.writeFileSync(goPath, 'go');
 
     const deadline = Date.now() + 20000;
     while (!fs.existsSync(resultPath) && Date.now() < deadline) sleepSync(25);
