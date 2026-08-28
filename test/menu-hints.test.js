@@ -3,6 +3,8 @@
  * and selected-item background width (CJK support)
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const EventEmitter = require('events');
 

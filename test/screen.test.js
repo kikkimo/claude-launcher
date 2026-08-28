@@ -3,6 +3,8 @@
  * Intercepts process.stdout.write to verify rendering invariants
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const fs = require('fs');
 

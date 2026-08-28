@@ -1,3 +1,5 @@
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 let passed = 0, failed = 0;
 function test(name, fn) {

@@ -20,7 +20,7 @@ An elegant interactive launcher for Claude Code with a beautiful Claude-style in
 - Multi-language support (English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian, Portuguese, Japanese, Korean, Russian)
 
 ### 🔐 **Advanced Security**
-- AES-256-CBC encryption for all sensitive data
+- AES-256-GCM encryption for all sensitive data
 - Machine-specific encryption keys for enhanced security
 - Unified password guard for high-risk operations (edit, delete, import, export)
 - Password-protected configuration import/export
@@ -232,7 +232,7 @@ Claude Launcher uses an advanced configuration system:
 1. **Encrypted JSON Storage**: Configuration stored at `~/.claude-launcher-apis.json`
 2. **Interactive Setup**: First-time wizard guides you through all options
 3. **Multi-language Support**: Interface adapts to your preferred language
-4. **Security First**: All sensitive data encrypted with AES-256-CBC
+4. **Security First**: All sensitive data encrypted with AES-256-GCM
 
 ### First-time Setup Process
 
@@ -264,12 +264,63 @@ With password protection enabled:
 
 ### Enhanced Security Features
 
-- **AES-256-CBC Encryption**: All sensitive data encrypted with industry-standard algorithms
-- **Machine-specific Keys**: Encryption keys derived from unique machine characteristics
+- **AES-256-GCM Encryption**: authenticated encryption, so a wrong key or a
+  tampered file fails loudly instead of yielding garbage
+- **Machine-specific Keys**: the key is derived from a machine identity pinned
+  once in `~/.claude-launcher-machine.json` (IOPlatformUUID on macOS,
+  `/etc/machine-id` on Linux, MachineGuid on Windows). Earlier releases derived
+  it from the hostname, which drifts on macOS and could lock you out of your own
+  config — see the Backup section below.
 - **Password Protection**: Optional password layer for configuration import/export
 - **Secure Token Display**: API tokens masked in all interface displays
 - **Strong Password Requirements**: Enforced password complexity for maximum security
 - **Local Storage Only**: All data remains on your machine, cannot be decrypted elsewhere
+
+#### What the encryption does and does not protect
+
+It protects your tokens **once the ciphertext leaves this machine** — a config
+synced to cloud storage, committed into dotfiles, captured by a backup, or
+attached to a support ticket cannot be decrypted elsewhere. It does **not**
+protect against another process running as you on this machine: the key input is
+readable there by design, and the real boundary is the `0600` file permission.
+
+#### Backing up your configuration
+
+Back up `~/.claude-launcher-machine.json` **together with**
+`~/.claude-launcher-apis.json`. It holds the machine identity your tokens are
+encrypted under. Losing it alone is usually survivable — on this machine the
+identity can normally be probed again — but a config restored without it onto a
+*different* machine still needs export/import.
+
+If the launcher ever reports that the key material file is unreadable, do **not**
+delete your config: repair or remove the key material file instead.
+
+Two files are created next to the config in specific situations, and neither is
+ever deleted automatically:
+
+| File | When | What to do |
+|---|---|---|
+| `.claude-launcher-apis.json.pre-key-migration.<hash>` | each time a config is re-encrypted under a new key generation | keep it; it is the ciphertext from before that migration |
+
+##### Restoring from a pre-migration snapshot
+
+The launcher never uses a snapshot on its own — that is what keeps it a safety
+net rather than another file that can rotate away. If the launcher tells you a
+readable snapshot exists, or you need one after losing every generation:
+
+1. Make a copy of everything first: `cp ~/.claude-launcher-apis.json* /tmp/backup/`
+2. Look at the snapshot's header — it is JSON. `source` and `idHint` describe the
+   machine identity that was current when it was taken. `idHint` is the first 12
+   hex characters of `sha256(<machine id>)`; the id itself is deliberately not
+   stored, because this file travels next to your config.
+3. Extract the ciphertext into place:
+   `node -e 'const fs=require("fs");fs.writeFileSync(process.argv[2],JSON.parse(fs.readFileSync(process.argv[1],"utf8")).ciphertext)' <snapshot> ~/.claude-launcher-apis.json`
+   (a snapshot written by an older build has no header — copy it as-is)
+4. Start the launcher. If the snapshot's key is still reachable it is recovered
+   and re-encrypted automatically; if not, the config is left untouched and
+   reported as unreadable.
+
+| `.claude-launcher-apis.json*.unreadable.N` | you chose "Set the unreadable config aside" | keep it; "Restore a set-aside config" in API management can bring it back if its key becomes reachable again |
 
 ## 📋 Requirements
 

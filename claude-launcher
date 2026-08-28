@@ -1301,15 +1301,12 @@ async function showApiManagementMenu() {
     ]);
 
     // While the config file is unreadable every save is refused (issue #11
-    // guard) — block management so edits can never appear to succeed silently.
+    // guard), so ordinary management stays blocked — an edit must never appear
+    // to succeed silently. But blocking used to be the WHOLE story, which is
+    // the second half of the original bug report: "and the UI won't let me
+    // change the config either". Offer the way out instead of a dead end.
     if (apiManager.loadError) {
-        screen.render([
-            '',
-            colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
-            '',
-        ]);
-        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
-        return showMenu();
+        return showConfigRecoveryMenu();
     }
 
     // Check if this is first time usage and prompt for password setup
@@ -1335,6 +1332,16 @@ async function showApiManagementMenu() {
         menuOptions.push(await i18n.t('menu.api_management.export'));          // 6
         menuOptions.push(await i18n.t('menu.api_management.import'));          // 7
         menuOptions.push(await i18n.t('menu.api_management.change_password')); // 8
+    }
+
+    // A set-aside config is only ever revisited on request: once a valid config
+    // exists the loader has no reason to look at quarantined files, so without
+    // this entry "quarantine is reversible" would be true only on paper.
+    // Appended after the fixed indices so it cannot shift them.
+    let restoreQuarantinedIndex = -1;
+    if (apiManager.listQuarantined().length > 0) {
+        restoreQuarantinedIndex = menuOptions.length;
+        menuOptions.push(await i18n.t('menu.api_management.restore_quarantined'));
     }
 
     menuOptions.push(await i18n.t('menu.api_management.back'));      // last
@@ -1410,8 +1417,130 @@ async function showApiManagementMenu() {
         }
     }
 
+    if (restoreQuarantinedIndex !== -1 && choice === restoreQuarantinedIndex) {
+        await restoreQuarantinedConfig();
+        return showApiManagementMenu();
+    }
+
     // Back to Main Menu (last item) or default fallback
     return showMenu();
+}
+
+/**
+ * The way out when the config cannot be read: set the unreadable generations
+ * aside (renamed, never deleted) so the launcher becomes usable again.
+ *
+ * Only this one action is offered — q/ESC already is "leave it alone and go
+ * look at the files yourself".
+ */
+async function showConfigRecoveryMenu() {
+    const { confirmAction } = require('./lib/ui/prompts');
+
+    screen.render([
+        '',
+        colors.bright + colors.orange + '📋 ' + i18n.tSync('menu.api_management.title') + colors.reset,
+        '',
+    ]);
+
+    if (apiManager.keyMaterialError) {
+        // Quarantine is disabled in this state: without a key we cannot tell an
+        // unreadable config from a perfectly good one — and setting a HEALTHY
+        // config aside because its key material broke would be the worse error.
+        screen.render([
+            colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
+                'warnings.config_unreadable_key_material',
+                require('./lib/machine-key').sidecarPath(),
+                apiManager.keyMaterialError) + colors.reset,
+            '',
+        ]);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return showMenu();
+    }
+
+    screen.render([
+        colors.bright + colors.red + '  ⚠️  ' + i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset,
+        colors.gray + '      ' + apiManager.loadError.message + colors.reset,
+        '',
+    ]);
+
+    const options = [
+        await i18n.t('menu.api_management.quarantine_config'),
+        await i18n.t('menu.api_management.back'),
+    ];
+    const menu = new Menu();
+    menu.setOptions(options);
+    const choice = await menu.navigate();
+
+    if (choice !== 0) return showMenu();
+
+    // A line-read confirmation on purpose: waitForKey() resolves immediately
+    // when stdin is not a TTY, so using it here would silently quarantine the
+    // user's config whenever the launcher runs under a pipe or in CI.
+    const confirmed = await confirmAction(
+        i18n.tSync('quarantine.confirm', apiManager.configFile));
+    if (!confirmed) {
+        screen.render(['', colors.gray + '  ' + i18n.tSync('quarantine.cancelled') + colors.reset, '']);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return showMenu();
+    }
+
+    const result = apiManager.quarantineUnreadableConfig();
+    screen.render(['', result.ok
+        ? colors.green + '  ' + i18n.tSync('quarantine.done', result.index, (result.moved || []).length) + colors.reset
+        : colors.red + '  ' + i18n.tSync('quarantine.failed', result.error || result.reason) + colors.reset, '']);
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+    return showMenu();
+}
+
+/**
+ * Bring a set-aside config back. This is what makes quarantine reversible in
+ * practice: a config that could not be opened on one network often opens again
+ * on another, but nothing else on the startup path will ever look at it.
+ */
+async function restoreQuarantinedConfig() {
+    const { confirmAction } = require('./lib/ui/prompts');
+
+    const entries = apiManager.listQuarantined();
+    const readable = entries.filter(entry => entry.readable);
+    if (readable.length === 0) {
+        screen.render([
+            '',
+            colors.yellow + '  ' + i18n.tSync('quarantine.restore_none') + colors.reset,
+            '',
+            ...entries.map(entry => colors.gray + '  ' +
+                i18n.tSync('quarantine.entry_unreadable', entry.index) + colors.reset),
+            '',
+        ]);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return;
+    }
+
+    const labels = readable.map(entry => i18n.tSync(
+        'quarantine.entry_readable', entry.index, entry.apiNames.length, entry.apiNames.join(', ')));
+    labels.push(await i18n.t('menu.api_management.back'));
+    screen.render([
+        '',
+        colors.bright + colors.orange + '📋 ' + i18n.tSync('quarantine.restore_title') + colors.reset,
+        '',
+    ]);
+    const menu = new Menu();
+    menu.setOptions(labels);
+    const choice = await menu.navigate();
+    if (choice < 0 || choice >= readable.length) return;
+
+    const chosen = readable[choice];
+    const confirmed = await confirmAction(i18n.tSync('quarantine.restore_confirm', chosen.index));
+    if (!confirmed) {
+        screen.render(['', colors.gray + '  ' + i18n.tSync('quarantine.cancelled') + colors.reset, '']);
+        await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
+        return;
+    }
+
+    const result = apiManager.restoreQuarantined(chosen.index);
+    screen.render(['', result.ok
+        ? colors.green + '  ' + i18n.tSync('quarantine.restore_done', chosen.index, apiManager.getApis().length) + colors.reset
+        : colors.red + '  ' + i18n.tSync('quarantine.restore_failed', result.error || result.reason) + colors.reset, '']);
+    await waitForKey(i18n.tSync('ui.general.press_any_key_continue'));
 }
 
 /**
@@ -1868,16 +1997,93 @@ async function showMenu() {
         // Silently ignore model upgrade check errors
     }
 
-    // Config health warning (issue #11): config loss must be visible, never silent
-    let configHealthWarning = null;
-    if (apiManager.loadError) {
-        configHealthWarning = colors.bright + colors.red + '  ⚠️  ' +
-            i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset;
+    // Config health warnings (issue #11): config loss must be visible, never
+    // silent. Each of these is computed somewhere deep in the load path and was
+    // previously thrown away — a diagnosis nobody ever saw.
+    const healthLines = [];
+    if (apiManager.loadError && apiManager.keyMaterialError) {
+        // Root cause is the key material, not the config. Saying "the config
+        // file is unreadable" here would point the user at the wrong file — and
+        // the obvious reaction to that message destroys every token, while the
+        // actual fix is removing one file whose contents can be re-derived.
+        healthLines.push(colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
+            'warnings.config_unreadable_key_material',
+            require('./lib/machine-key').sidecarPath(),
+            apiManager.keyMaterialError) + colors.reset);
+    } else if (apiManager.keyMaterialError) {
+        // Reachable since the candidate sweep gained the probe result: the
+        // config opens fine, but every save is refused. Saying so up front
+        // beats letting the user discover it when an edit fails.
+        healthLines.push(colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.key_material_degraded', apiManager.keyMaterialError) + colors.reset);
+    } else if (apiManager.loadError) {
+        healthLines.push(colors.bright + colors.red + '  ⚠️  ' +
+            i18n.tSync('warnings.config_load_error', apiManager.configFile) + colors.reset);
+        // The reason itself, not just the path: "decryption failed (...)" is
+        // what distinguishes a wrong key from a truncated file.
+        healthLines.push(colors.gray + '      ' + apiManager.loadError.message + colors.reset);
     } else if (apiManager.recoveredFromBackup) {
-        configHealthWarning = colors.yellow + '  ⚠️  ' +
-            i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset;
+        healthLines.push(colors.yellow + '  ⚠️  ' +
+            i18n.tSync('warnings.config_recovered', apiManager.configFile) + colors.reset);
+        // "Recovered from backup" is a reassuring sentence about an event that
+        // silently moved the config BACK in time. Say where the generation it
+        // replaced went, so the user can judge what may have been lost.
+        if (apiManager.supersededGeneration) {
+            healthLines.push(colors.gray + '      ' +
+                i18n.tSync('warnings.superseded_preserved', apiManager.supersededGeneration) + colors.reset);
+        }
         apiManager.recoveredFromBackup = false; // warn once per run
     }
+
+    // Name the APIs whose token could not be opened. Without this the user only
+    // meets the problem later, as a generic auth failure at launch time.
+    const unrecoverable = (apiManager.keyRecoveryReport || {}).unrecoverable || [];
+    if (unrecoverable.length > 0 && !apiManager.keyRecoveryWarned) {
+        healthLines.push(colors.bright + colors.red + '  ⚠️  ' + i18n.tSync(
+            'warnings.token_unrecoverable',
+            unrecoverable.map(entry => entry.apiName).join(', '),
+            // The real paths on disk. Snapshots are content-addressed, so a
+            // constructed name points at a file that does not exist — and a
+            // recovery instruction naming a missing file is worse than none.
+            apiManager.listSnapshots().map(entry => entry.path).join(', ') ||
+                apiManager.configFile + '*') + colors.reset);
+        apiManager.keyRecoveryWarned = true; // once per run
+    }
+
+    // Degraded key material: the identity fell back to the hostname, or could
+    // not be pinned at all. Not fatal, but it silently weakens the guarantee.
+    if (!apiManager.keyMaterialWarned) {
+        const warnings = require('./lib/machine-key').getWarnings();
+        for (const warning of warnings) {
+            healthLines.push(colors.yellow + '  ⚠️  ' +
+                i18n.tSync('warnings.key_material_degraded', warning) + colors.reset);
+        }
+        // Latch only once something was actually shown. Probing is lazy, so on
+        // a first run the list is still empty at this point and the warning the
+        // first encrypt() then produces would never be rendered at all.
+        if (warnings.length > 0) apiManager.keyMaterialWarned = true;
+    }
+
+    // A snapshot that outlived every generation holds the only remaining copy
+    // of the user's APIs. It is never consumed automatically, so saying it is
+    // there is the difference between recovering and losing it.
+    if (apiManager.snapshotNotice) {
+        // Both cases must speak. Silence on the unreadable one is the dangerous
+        // half: the wizard offers a clean fresh start while the only file that
+        // still holds the user's tokens sits next to it, and the only lever
+        // they can find is deleting it.
+        healthLines.push(colors.bright + colors.yellow + '  ⚠️  ' + i18n.tSync(
+            apiManager.snapshotNotice.readable ? 'warnings.snapshot_available' : 'warnings.snapshot_unreadable',
+            apiManager.snapshotNotice.path) + colors.reset);
+    }
+
+    // Set-aside configs are only ever revisited on request, so say they exist.
+    if (!apiManager.loadError && apiManager.listQuarantined().length > 0) {
+        healthLines.push(colors.gray + '  ℹ️  ' +
+            i18n.tSync('warnings.quarantine_available') + colors.reset);
+    }
+
+    const configHealthWarning = healthLines.length > 0 ? healthLines.join('\n') : null;
 
     // Combine version info and model upgrade info
     let displayInfo = '';
@@ -2057,6 +2263,14 @@ async function exportConfiguration() {
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_file_saved', filePath) + colors.reset + '\n');
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_export_dir', exportDir) + colors.reset + '\n');
         screen.write(colors.gray + `  • ` + i18n.tSync('import_export.export.details_filename', filename) + colors.reset + '\n');
+        // Entries whose stored token could not be decrypted are skipped rather
+        // than blocking the whole export — but skipping them without saying so
+        // is the silence this was meant to replace.
+        const skippedExports = JSON.parse(exportData).skipped || [];
+        if (skippedExports.length > 0) {
+            screen.write(colors.yellow + `  • ` + i18n.tSync('import_export.export.details_skipped',
+                skippedExports.map(entry => entry.name).join(', ')) + colors.reset + '\n');
+        }
         screen.write('\n');
 
         // Open file with default application

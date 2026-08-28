@@ -8,6 +8,8 @@
  *   config-management.test.js — the claude-launcher script cannot be required)
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');

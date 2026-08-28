@@ -12,6 +12,8 @@
  * translation packs against drift.
  */
 
+require('./helpers/isolate-key-material');
+
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
